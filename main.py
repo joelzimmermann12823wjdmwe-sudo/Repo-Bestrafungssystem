@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import discord
 from discord import app_commands
 from discord.ext import commands
+from aiohttp import web
 from dotenv import load_dotenv
 
 
@@ -24,6 +25,8 @@ ADMIN_ROLE_IDS = [
 ]
 
 DATA_FILE = "strafen.json"
+WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
+WEB_PORT = int(os.getenv("PORT", os.getenv("WEB_PORT", "8080")))
 
 
 intents = discord.Intents.default()
@@ -31,6 +34,7 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+punishment_task: asyncio.Task | None = None
 
 
 def ensure_data_file() -> None:
@@ -148,6 +152,31 @@ async def remove_expired_punishments() -> None:
         await asyncio.sleep(10)
 
 
+async def healthcheck(_: web.Request) -> web.Response:
+    return web.json_response(
+        {
+            "status": "ok",
+            "bot_ready": bot.is_ready(),
+            "latency_ms": round(bot.latency * 1000) if bot.is_ready() else None,
+        }
+    )
+
+
+async def start_webserver() -> web.AppRunner:
+    app = web.Application()
+    app.router.add_get("/", healthcheck)
+    app.router.add_get("/health", healthcheck)
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(runner, host=WEB_HOST, port=WEB_PORT)
+    await site.start()
+
+    print(f"Webservice aktiv auf http://{WEB_HOST}:{WEB_PORT}")
+    return runner
+
+
 @bot.event
 async def on_ready() -> None:
     ensure_data_file()
@@ -157,6 +186,13 @@ async def on_ready() -> None:
         print(f"Bot ist online als {bot.user} | {len(synced)} Slash-Commands synchronisiert.")
     except Exception as error:
         print(f"Fehler beim Synchronisieren der Commands: {error}")
+
+
+async def setup_background_tasks() -> None:
+    global punishment_task
+
+    if punishment_task is None or punishment_task.done():
+        punishment_task = asyncio.create_task(remove_expired_punishments())
 
 
 @bot.tree.command(name="ping", description="Zeigt die Latenz des Bots an.", guild=discord.Object(id=GUILD_ID))
@@ -274,8 +310,20 @@ async def main() -> None:
         raise ValueError("PUNISHMENT_ROLE_ID fehlt in der .env Datei.")
     if not ADMIN_ROLE_IDS:
         raise ValueError("ADMIN_ROLE_IDS fehlt in der .env Datei.")
-    bot.loop.create_task(remove_expired_punishments())
-    await bot.start(TOKEN)
+
+    web_runner = await start_webserver()
+
+    try:
+        await setup_background_tasks()
+        await bot.start(TOKEN)
+    finally:
+        if punishment_task is not None:
+            punishment_task.cancel()
+            try:
+                await punishment_task
+            except asyncio.CancelledError:
+                pass
+        await web_runner.cleanup()
 
 
 if __name__ == "__main__":
