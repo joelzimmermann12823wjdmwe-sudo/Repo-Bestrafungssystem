@@ -24,7 +24,8 @@ ADMIN_ROLE_IDS = [
     if role_id.strip()
 ]
 
-DATA_FILE = "strafen.json"
+DATA_DIR = os.getenv("DATA_DIR", ".")
+DATA_FILE = os.path.join(DATA_DIR, "strafen.json")
 WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
 WEB_PORT = int(os.getenv("PORT", os.getenv("WEB_PORT", "8080")))
 
@@ -38,6 +39,7 @@ punishment_task: asyncio.Task | None = None
 
 
 def ensure_data_file() -> None:
+    os.makedirs(DATA_DIR, exist_ok=True)
     if not os.path.exists(DATA_FILE):
         with open(DATA_FILE, "w", encoding="utf-8") as file:
             json.dump([], file, indent=4)

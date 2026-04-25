@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: bestrafungssystem-bot
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: PUNISHMENT_ROLE_ID
+        sync: false
+      - key: ADMIN_ROLE_IDS
+        sync: false
+      - key: WEB_HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DATA_DIR
+        value: /opt/render/project/src/data
+    disk:
+      name: punishment-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
