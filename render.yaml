@@ -1,10 +1,10 @@
 services:
   - type: web
     name: bestrafungssystem-bot
-    runtime: python
+    runtime: node
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    buildCommand: npm install
+    startCommand: node bot.js
     healthCheckPath: /health
     envVars:
       - key: DISCORD_TOKEN
