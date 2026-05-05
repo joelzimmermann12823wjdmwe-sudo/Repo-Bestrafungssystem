@@ -868,8 +868,7 @@ client.once('clientReady', async () => {
 
 startWebServer(client, activeRecordings, TALKS_DIR);
 
-// Keep-Alive: Self-ping alle 2 Min, Interaktion alle 3 Min (verhindert Render-Sleep)
-const PORT = parseInt(process.env.PORT) || 8080;
+// Keep-Alive: Self-ping alle 2 Min, Interaktion alle 3 Min
 const SELF_URL = `http://localhost:${PORT}`;
 
 setInterval(() => {
