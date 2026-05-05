@@ -1,10 +1,14 @@
 node_modules/
 .env
+.env.local
 __pycache__/
 *.pyc
 *.log
 data/
 talks/
+sessions.json
+strafen.json
+counter.json
 .DS_Store
 Thumbs.db
 .vscode/

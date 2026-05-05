@@ -23,7 +23,8 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     app.use(express.static(path.join(__dirname, '..', 'public')));
 
     // Persistent session store
-    const SESSIONS_FILE = join(__dirname, '..', 'sessions.json');
+    const DATA_DIR = process.env.DATA_DIR || join(__dirname, '..');
+    const SESSIONS_FILE = join(DATA_DIR, 'sessions.json');
     let sessions = {};
     const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
     const SESSION_CLEANUP_INTERVAL = 60 * 60 * 1000; // 1 hour

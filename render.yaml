@@ -2,7 +2,6 @@ services:
   - type: web
     name: bestrafungssystem-bot
     runtime: node
-    plan: starter
     buildCommand: npm install
     startCommand: node src/bot.js
     healthCheckPath: /health
@@ -21,6 +20,8 @@ services:
         value: 10000
       - key: DATA_DIR
         value: /opt/render/project/src/data
+      - key: MAX_RECORDINGS
+        value: 10
       - key: WEB_USERNAME
         sync: false
       - key: WEB_PASSWORD
