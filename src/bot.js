@@ -744,13 +744,19 @@ function getClientIdFromToken(token) {
 
 async function registerCommands(clientId) {
     const rest = new REST({ version: '10' }).setToken(TOKEN);
-    const route = GUILD_ID 
-        ? Routes.applicationGuildCommands(clientId, GUILD_ID)
-        : Routes.applicationCommands(clientId);
+    const guildRoute = Routes.applicationGuildCommands(clientId, GUILD_ID);
+    const globalRoute = Routes.applicationCommands(clientId);
 
     try {
-        await rest.put(route, { body: commands.map(c => c.toJSON()) });
-        console.log('[Commands] Sofort synchronisiert!');
+        if (GUILD_ID) {
+            await rest.put(guildRoute, { body: commands.map(c => c.toJSON()) });
+            console.log('[Commands] Guild-Commands synchronisiert!');
+            await rest.put(globalRoute, { body: [] });
+            console.log('[Commands] Alte Global-Commands entfernt!');
+        } else {
+            await rest.put(globalRoute, { body: commands.map(c => c.toJSON()) });
+            console.log('[Commands] Global-Commands synchronisiert!');
+        }
     } catch (err) {
         console.error('[Fehler] Commands:', err.message);
     }
