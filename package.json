@@ -1,20 +1,23 @@
 {
   "name": "bestrafungssystem-bot",
-  "version": "1.0.0",
-  "description": "Discord punishment bot with voice recording",
-  "main": "bot.js",
+  "version": "3.0.0",
+  "description": "Discord punishment bot with voice recording and download portal",
+  "main": "src/bot.js",
   "scripts": {
-    "start": "node bot.js",
-    "dev": "node --watch bot.js"
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js",
+    "test": "node test.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",
+    "cookie-parser": "^1.4.7",
     "discord.js": "^14.18.0",
     "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "opusscript": "^0.0.8"
+  },
+  "devDependencies": {
     "ffmpeg-static": "^5.2.0",
     "libsodium-wrappers": "^0.7.15"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   }
 }

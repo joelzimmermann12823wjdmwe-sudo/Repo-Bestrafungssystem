@@ -7,5 +7,4 @@ data/
 talks/
 .DS_Store
 Thumbs.db
-
-❌ Fehler: createAudioReceiver is not a function
+.vscode/
