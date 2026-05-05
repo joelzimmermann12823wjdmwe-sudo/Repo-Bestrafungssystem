@@ -6,7 +6,7 @@ const fs = require('fs');
 const { join } = require('path');
 const Opus = require('opusscript');
 const startWebServer = require('./server');
-const { uploadToGoogleDrive } = require('./gdrive');
+const { uploadToGoogleDrive, syncStrafen } = require('./gdrive');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) {
@@ -84,6 +84,7 @@ class PunishmentManager {
 
     async save() {
         await writeFile(this.filePath, JSON.stringify(this.punishments, null, 2), 'utf-8');
+        syncStrafen(this.filePath);
     }
 
     scheduleRestore(punishment, guild) {

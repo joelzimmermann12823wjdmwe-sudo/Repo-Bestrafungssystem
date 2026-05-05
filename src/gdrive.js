@@ -49,6 +49,46 @@ async function ensureFolderExists(drive, folderName) {
     return folder.data.id;
 }
 
+async function uploadSingleFile(filePath, fileName, parentFolderId) {
+    const drive = getDrive();
+    if (!drive) return null;
+
+    const stats = fs.statSync(filePath);
+    console.log(`[Drive] Upload: ${fileName} (${(stats.size / 1024).toFixed(1)} KB)`);
+
+    const media = {
+        mimeType: stats.size > 5 * 1024 * 1024 ? 'application/octet-stream' : 'application/json',
+        body: fs.createReadStream(filePath),
+    };
+
+    // Prüfen ob Datei existiert -> Updaten, sonst Erstellen
+    const existing = await drive.files.list({
+        q: `name='${fileName}' and '${parentFolderId}' in parents and trashed=false`,
+        fields: 'files(id)',
+    });
+
+    let res;
+    if (existing.data.files.length > 0) {
+        const fileId = existing.data.files[0].id;
+        res = await drive.files.update({
+            fileId,
+            media,
+            fields: 'id, name, webViewLink',
+        });
+    } else {
+        res = await drive.files.create({
+            requestBody: {
+                name: fileName,
+                parents: [parentFolderId],
+            },
+            media,
+            fields: 'id, name, webViewLink',
+        });
+    }
+
+    return res.data;
+}
+
 async function uploadToGoogleDrive(folderPath, folderName) {
     const drive = getDrive();
     if (!drive) {
@@ -69,29 +109,10 @@ async function uploadToGoogleDrive(folderPath, folderName) {
         const uploaded = [];
         for (const file of files) {
             const filePath = path.join(folderPath, file);
-            const stats = fs.statSync(filePath);
-
-            console.log(`[Drive] Upload: ${file} (${(stats.size / 1024).toFixed(1)} KB)`);
-
-            const media = {
-                mimeType: 'audio/wav',
-                body: fs.createReadStream(filePath),
-            };
-
-            const res = await drive.files.create({
-                requestBody: {
-                    name: file,
-                    parents: [parentFolderId],
-                },
-                media,
-                fields: 'id, name, webViewLink',
-            });
-
-            uploaded.push({
-                name: res.data.name,
-                id: res.data.id,
-                url: res.data.webViewLink,
-            });
+            const res = await uploadSingleFile(filePath, file, parentFolderId);
+            if (res) {
+                uploaded.push({ name: res.name, id: res.id, url: res.webViewLink });
+            }
         }
 
         console.log(`[Drive] ${uploaded.length} Dateien hochgeladen`);
@@ -102,4 +123,18 @@ async function uploadToGoogleDrive(folderPath, folderName) {
     }
 }
 
-module.exports = { uploadToGoogleDrive };
+async function syncStrafen(filePath) {
+    const drive = getDrive();
+    if (!drive) return;
+
+    try {
+        // Root Ordner
+        const folderId = await ensureFolderExists(drive, 'bestrafungssystem');
+        await uploadSingleFile(filePath, 'strafen.json', folderId);
+        console.log('[Drive] Strafen synchronisiert');
+    } catch (err) {
+        console.error(`[Drive] Strafen Sync fehlgeschlagen: ${err.message}`);
+    }
+}
+
+module.exports = { uploadToGoogleDrive, syncStrafen };
