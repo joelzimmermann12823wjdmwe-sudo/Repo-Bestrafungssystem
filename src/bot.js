@@ -737,28 +737,39 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
 });
 
+// Helper: Decode Client ID from Token to sync commands immediately
+function getClientIdFromToken(token) {
+    return Buffer.from(token.split('.')[0], 'base64').toString('ascii');
+}
+
+async function registerCommands(clientId) {
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    const route = GUILD_ID 
+        ? Routes.applicationGuildCommands(clientId, GUILD_ID)
+        : Routes.applicationCommands(clientId);
+
+    try {
+        await rest.put(route, { body: commands.map(c => c.toJSON()) });
+        console.log('[Commands] Sofort synchronisiert!');
+    } catch (err) {
+        console.error('[Fehler] Commands:', err.message);
+    }
+}
+
+// Sync commands immediately
+registerCommands(getClientIdFromToken(TOKEN));
+
 client.once('clientReady', async () => {
     console.log(`Bot online: ${client.user.tag}`);
     punishmentManager = new PunishmentManager(STRAFEN_FILE);
     await punishmentManager.load();
-    try {
-        const rest = new REST({ version: '10' }).setToken(TOKEN);
-        if (GUILD_ID) {
-            await rest.put(Routes.applicationGuildCommands(client.user.id, GUILD_ID), { body: commands.map(c => c.toJSON()) });
-        } else {
-            await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(c => c.toJSON()) });
-        }
-        console.log('[Commands] OK');
-    } catch (err) {
-        console.error('[Fehler] Commands:', err.message);
-    }
     const guild = GUILD_ID ? client.guilds.cache.get(GUILD_ID) : client.guilds.cache.first();
     for (const p of punishmentManager.getActivePunishments()) {
         punishmentManager.scheduleRestore(p, guild);
     }
 
-    // Resume recordings for channels that still have users
-    if (guild && recordChannelConfig.channels.length > 0 || recordChannelConfig.recordAll) {
+    // Resume recordings
+    if (guild && (recordChannelConfig.channels.length > 0 || recordChannelConfig.recordAll)) {
         const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
         for (const [, channel] of voiceChannels) {
             if (channel.members.size > 0 && shouldRecordChannel(channel.id)) {
