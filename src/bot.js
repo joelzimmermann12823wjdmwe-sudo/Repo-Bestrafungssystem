@@ -587,14 +587,19 @@ client.on('interactionCreate', async (interaction) => {
                 saveRecordChannels();
             }
 
-            const result = await startRecordingForChannel(channel, guild, true);
-            let msg;
-            if (result === 'started') msg = `Aufnahme fuer **${channel.name}** gestartet!`;
-            else if (result === 'already_active') msg = `Aufnahme fuer **${channel.name}** ist bereits aktiv.`;
-            else if (result === 'max_reached') msg = `Maximale Anzahl an Aufnahmen erreicht!`;
-            else msg = `Fehler beim Starten der Aufnahme in **${channel.name}**! Siehe Logs.`;
-
-            await interaction.editReply({ content: msg });
+            const humanCount = channel.members.filter(m => !m.user.bot).size;
+            if (humanCount > 0 && !activeRecordings.has(channelId)) {
+                const result = await startRecordingForChannel(channel, guild, true);
+                if (result === 'started') {
+                    await interaction.editReply({ content: `Aufnahme fuer **${channel.name}** gestartet! (${humanCount} User)` });
+                } else if (result === 'already_active') {
+                    await interaction.editReply({ content: `Aufnahme fuer **${channel.name}** ist bereits aktiv.` });
+                } else {
+                    await interaction.editReply({ content: `Fehler beim Starten in **${channel.name}**!` });
+                }
+            } else {
+                await interaction.editReply({ content: `Channel **${channel.name}** zur Aufnahme-Liste hinzugefuegt.\nBot joint automatisch wenn User den Channel betreten.` });
+            }
         }
 
         if (subcommand === 'all') {
@@ -604,14 +609,21 @@ client.on('interactionCreate', async (interaction) => {
 
             const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
             let count = 0;
-            let errors = 0;
+            let waiting = 0;
             for (const [, channel] of voiceChannels) {
-                const res = await startRecordingForChannel(channel, guild, true);
-                if (res === 'started') count++;
-                else if (res === 'error') errors++;
+                const humanCount = channel.members.filter(m => !m.user.bot).size;
+                if (humanCount > 0) {
+                    const res = await startRecordingForChannel(channel, guild, true);
+                    if (res === 'started') count++;
+                } else {
+                    waiting++;
+                }
             }
 
-            await interaction.editReply({ content: `Aufnahme fuer **alle Voice-Channels** aktiviert!\nBot in ${count} Channels gestartet. ${errors > 0 ? `(${errors} Fehler)` : ''}` });
+            let msg = `Aufnahme fuer **alle Voice-Channels** aktiviert!`;
+            if (count > 0) msg += `\nBot in ${count} Channels gestartet.`;
+            if (waiting > 0) msg += `\n${waiting} Channels warten auf User.`;
+            await interaction.editReply({ content: msg });
         }
 
         if (subcommand === 'stop') {
@@ -720,7 +732,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (GUILD_ID && guild.id !== GUILD_ID) return;
 
     const userId = newState.id || oldState.id;
-    if (userId === client.user.id) return; // Ignore bot's own voice changes
+    if (userId === client.user.id) return;
 
     // User joined a channel
     if (newState.channelId && !oldState.channelId) {
@@ -749,19 +761,20 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             users.delete(userId);
         }
 
-        // Check if channel is empty (only bot left)
+        // Check if channel is empty (no humans)
         const channel = guild.channels.cache.get(channelId);
         const humanCount = channel ? channel.members.filter(m => !m.user.bot).size : 0;
         
         if (humanCount === 0 && activeRecordings.has(channelId)) {
-            // Wait a bit to see if someone rejoins
+            console.log(`[Voice] Channel ${channel?.name || channelId} leer - stoppe in 10s...`);
             setTimeout(async () => {
                 const ch = guild.channels.cache.get(channelId);
-                const currentHumanCount = ch ? ch.members.filter(m => !m.user.bot).size : 0;
-                if (currentHumanCount === 0 && activeRecordings.has(channelId)) {
+                const count = ch ? ch.members.filter(m => !m.user.bot).size : 0;
+                if (count === 0 && activeRecordings.has(channelId)) {
                     await stopRecordingForChannel(channelId);
+                    console.log(`[Voice] Aufnahme gestoppt (Channel leer)`);
                 }
-            }, 5000);
+            }, 10000);
         }
     }
 
@@ -776,13 +789,15 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         const oldChannel = guild.channels.cache.get(oldState.channelId);
         const oldHumanCount = oldChannel ? oldChannel.members.filter(m => !m.user.bot).size : 0;
         if (oldHumanCount === 0 && activeRecordings.has(oldState.channelId)) {
+            console.log(`[Voice] Channel ${oldChannel?.name || oldState.channelId} leer - stoppe in 10s...`);
             setTimeout(async () => {
                 const ch = guild.channels.cache.get(oldState.channelId);
-                const currentHumanCount = ch ? ch.members.filter(m => !m.user.bot).size : 0;
-                if (currentHumanCount === 0 && activeRecordings.has(oldState.channelId)) {
+                const count = ch ? ch.members.filter(m => !m.user.bot).size : 0;
+                if (count === 0 && activeRecordings.has(oldState.channelId)) {
                     await stopRecordingForChannel(oldState.channelId);
+                    console.log(`[Voice] Aufnahme gestoppt (Channel leer)`);
                 }
-            }, 5000);
+            }, 10000);
         }
 
         // Handle joining new channel
@@ -839,11 +854,12 @@ client.once('clientReady', async () => {
         punishmentManager.scheduleRestore(p, guild);
     }
 
-    // Resume recordings for configured channels
+    // Resume recordings for configured channels (only where humans are)
     if (guild && (recordChannelConfig.channels.length > 0 || recordChannelConfig.recordAll)) {
         const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
         for (const [, channel] of voiceChannels) {
-            if (shouldRecordChannel(channel.id)) {
+            const humanCount = channel.members.filter(m => !m.user.bot).size;
+            if (humanCount > 0 && shouldRecordChannel(channel.id)) {
                 await startRecordingForChannel(channel, guild, true);
             }
         }
