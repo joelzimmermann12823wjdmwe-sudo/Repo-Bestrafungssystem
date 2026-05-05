@@ -7,6 +7,7 @@ const { join } = require('path');
 const Opus = require('opusscript');
 const startWebServer = require('./server');
 const { uploadToGoogleDrive, syncStrafen } = require('./gdrive');
+const http = require('http');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) {
@@ -156,6 +157,7 @@ class VoiceRecorder {
         this.SAMPLE_RATE = 48000;
         this.CHANNELS = 2;
         this.FRAME_SIZE = this.SAMPLE_RATE / 50;
+        this._decodedPcm = new Map();
     }
 
     startUserStream(receiver, userId, username) {
@@ -198,9 +200,49 @@ class VoiceRecorder {
 
         const results = await Promise.allSettled(promises);
         const success = results.filter(r => r.status === 'fulfilled' && r.value).length;
+
+        // Create combined talk file
+        await this._saveCombinedTalk();
+
         this.userRecordings.clear();
+        this._decodedPcm.clear();
         console.log(`[Audio] ${success} Aufnahmen gespeichert.`);
         return success;
+    }
+
+    async _saveCombinedTalk() {
+        if (this._decodedPcm.size === 0) return;
+
+        // Find max length to interleave
+        let maxLen = 0;
+        const buffers = [];
+        for (const [, pcm] of this._decodedPcm) {
+            buffers.push(pcm);
+            if (pcm.length > maxLen) maxLen = pcm.length;
+        }
+
+        // Interleave: mix all PCM samples together
+        const mixed = Buffer.alloc(maxLen);
+        for (let i = 0; i < maxLen; i += 2) {
+            let sum = 0;
+            let count = 0;
+            for (const buf of buffers) {
+                if (i < buf.length) {
+                    sum += buf.readInt16LE(i);
+                    count++;
+                }
+            }
+            const avg = count > 0 ? Math.round(sum / count) : 0;
+            mixed.writeInt16LE(Math.max(-32768, Math.min(32767, avg)), i);
+        }
+
+        const normalized = this._normalizeAudio(mixed);
+        const wav = this._buildWav(normalized);
+        const combinedPath = join(this.outputDir, 'TALK_GESAMT.wav');
+        fs.writeFileSync(combinedPath, wav);
+
+        const s = await stat(combinedPath);
+        console.log(`[Audio] Gesamt-Talk: ${(s.size / 1024).toFixed(1)} KB`);
     }
 
     _waitForCloseAndDecode(data) {
@@ -236,6 +278,8 @@ class VoiceRecorder {
                 decoder.delete();
 
                 const pcmBuffer = Buffer.concat(pcmFrames);
+                this._decodedPcm.set(data.username, pcmBuffer);
+
                 const normalized = this._normalizeAudio(pcmBuffer);
                 const wav = this._buildWav(normalized);
 
@@ -807,6 +851,38 @@ client.once('clientReady', async () => {
 });
 
 startWebServer(client, activeRecordings, TALKS_DIR);
+
+// Keep-Alive: Self-ping alle 2 Min, Interaktion alle 3 Min (verhindert Render-Sleep)
+const PORT = parseInt(process.env.PORT) || 8080;
+const SELF_URL = `http://localhost:${PORT}`;
+
+setInterval(() => {
+    http.get(`${SELF_URL}/health`, (res) => {
+        res.on('data', () => {});
+        res.on('end', () => {
+            console.log('[Keep-Alive] Health-Check OK');
+        });
+    }).on('error', (e) => {
+        console.log('[Keep-Alive] Health-Check Error:', e.message);
+    });
+}, 2 * 60 * 1000); // Alle 2 Min
+
+setInterval(() => {
+    http.get(`${SELF_URL}/api/status`, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+            try {
+                const status = JSON.parse(data);
+                console.log(`[Keep-Alive] Status: Bot=${status.bot}, Recordings=${status.activeRecordings}`);
+            } catch {
+                console.log('[Keep-Alive] Status-Check OK');
+            }
+        });
+    }).on('error', (e) => {
+        console.log('[Keep-Alive] Status-Check Error:', e.message);
+    });
+}, 3 * 60 * 1000); // Alle 3 Min
 
 client.login(TOKEN).catch(err => {
     console.error('[FATAL]', err.message);
