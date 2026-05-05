@@ -489,13 +489,17 @@ client.on('interactionCreate', async (interaction) => {
             if (!guild) return interaction.respond([]);
 
             const channels = guild.channels.cache
-                .filter(ch => ch.type === 2) // Voice channels
-                .map(ch => ({ name: `${ch.name} (${ch.id})`, value: ch.id }));
+                .filter(ch => ch.type === 2)
+                .map(ch => ({ name: `${ch.name}`, value: ch.id }));
 
             const query = focused.value.toLowerCase();
-            const filtered = query ? channels.filter(ch => ch.name.toLowerCase().includes(query)) : channels;
+            const filtered = query ? channels.filter(ch => ch.name.toLowerCase().includes(query) || ch.value.includes(query)) : channels;
 
-            await interaction.respond(filtered.slice(0, 25));
+            try {
+                await interaction.respond(filtered.slice(0, 25));
+            } catch (e) {
+                console.log('[Autocomplete] Error:', e.message);
+            }
         }
         return;
     }
@@ -529,13 +533,12 @@ client.on('interactionCreate', async (interaction) => {
                 saveRecordChannels();
             }
 
-            // If someone is already in the channel, start recording immediately
-            const members = channel.members;
-            if (members.size > 0 && !activeRecordings.has(channelId)) {
-                await startRecordingForChannel(channel, guild, true);
-            }
+            const started = await startRecordingForChannel(channel, guild, true);
+            const msg = started 
+                ? `Aufnahme fuer **${channel.name}** gestartet!`
+                : `Aufnahme fuer **${channel.name}** ist bereits aktiv.`;
 
-            await interaction.reply({ content: `Aufnahme fuer **${channel.name}** aktiviert!\nBot nimmt automatisch auf wenn User joinen.`, ephemeral: false });
+            await interaction.reply({ content: msg, ephemeral: false });
         }
 
         if (subcommand === 'all') {
@@ -545,13 +548,12 @@ client.on('interactionCreate', async (interaction) => {
 
             // Start recording in all channels with users
             const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
+            let count = 0;
             for (const [, channel] of voiceChannels) {
-                if (channel.members.size > 0 && !activeRecordings.has(channel.id)) {
-                    await startRecordingForChannel(channel, guild, true);
-                }
+                if (await startRecordingForChannel(channel, guild, true)) count++;
             }
 
-            await interaction.reply({ content: 'Aufnahme fuer **alle Voice-Channels** aktiviert!', ephemeral: false });
+            await interaction.reply({ content: `Aufnahme fuer **alle Voice-Channels** aktiviert!\nBot in ${count} Channels.`, ephemeral: false });
         }
 
         if (subcommand === 'stop') {
@@ -774,11 +776,11 @@ client.once('clientReady', async () => {
         punishmentManager.scheduleRestore(p, guild);
     }
 
-    // Resume recordings
+    // Resume recordings for configured channels
     if (guild && (recordChannelConfig.channels.length > 0 || recordChannelConfig.recordAll)) {
         const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
         for (const [, channel] of voiceChannels) {
-            if (channel.members.size > 0 && shouldRecordChannel(channel.id)) {
+            if (shouldRecordChannel(channel.id)) {
                 await startRecordingForChannel(channel, guild, true);
             }
         }
