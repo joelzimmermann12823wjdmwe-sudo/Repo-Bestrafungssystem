@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, REST, Routes, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
 const { joinVoiceChannel, VoiceConnectionStatus, entersState, EndBehaviorType } = require('@discordjs/voice');
 const { mkdir, writeFile, readFile, stat } = require('fs/promises');
 const fs = require('fs');
@@ -338,11 +338,11 @@ function shouldRecordChannel(channelId) {
 }
 
 async function startRecordingForChannel(channel, guild, autoManaged = true) {
-    if (activeRecordings.has(channel.id)) return false;
+    if (activeRecordings.has(channel.id)) return 'already_active';
 
     if (activeRecordings.size >= MAX_RECORDINGS) {
         console.log(`[Record] Max recordings reached (${MAX_RECORDINGS})`);
-        return false;
+        return 'max_reached';
     }
 
     const folderName = getNextFolderName();
@@ -350,11 +350,13 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
 
     try {
         await mkdir(outputDir, { recursive: true });
-    } catch {
-        return false;
+    } catch (e) {
+        console.error(`[Fehler] Ordner erstellen: ${e.message}`);
+        return 'error';
     }
 
     try {
+        console.log(`[Voice] Versuche zu joinen: ${channel.name}`);
         const connection = joinVoiceChannel({
             channelId: channel.id,
             guildId: guild.id,
@@ -362,8 +364,9 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
             selfDeaf: false,
             selfMute: true,
         });
+        
         await entersState(connection, VoiceConnectionStatus.Ready, 20000);
-        console.log(`[Voice] ${channel.name} (${folderName})`);
+        console.log(`[Voice] Verbunden: ${channel.name} (${folderName})`);
 
         const recorder = new VoiceRecorder(outputDir);
         const receiver = connection.receiver;
@@ -392,10 +395,15 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
         });
 
         console.log(`[Record] Started in ${channel.name}`);
-        return true;
+        return 'started';
     } catch (error) {
         console.error(`[Fehler] Start ${channel.name}:`, error.message);
-        return false;
+        // Cleanup if connection was partially created
+        try {
+            const conn = activeRecordings.get(channel.id);
+            if (conn && conn.connection) conn.connection.destroy();
+        } catch {}
+        return 'error';
     }
 }
 
@@ -520,12 +528,14 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'Keine Berechtigung!', ephemeral: true });
         }
 
+        await interaction.deferReply({ ephemeral: subcommand === 'stop' });
+
         if (subcommand === 'channel') {
             const channelId = interaction.options.getString('channel');
             const channel = guild.channels.cache.get(channelId);
 
             if (!channel || channel.type !== 2) {
-                return interaction.reply({ content: 'Ungueltiger Voice-Channel!', ephemeral: true });
+                return interaction.editReply({ content: 'Ungueltiger Voice-Channel!' });
             }
 
             if (!recordChannelConfig.channels.includes(channelId)) {
@@ -533,12 +543,14 @@ client.on('interactionCreate', async (interaction) => {
                 saveRecordChannels();
             }
 
-            const started = await startRecordingForChannel(channel, guild, true);
-            const msg = started 
-                ? `Aufnahme fuer **${channel.name}** gestartet!`
-                : `Aufnahme fuer **${channel.name}** ist bereits aktiv.`;
+            const result = await startRecordingForChannel(channel, guild, true);
+            let msg;
+            if (result === 'started') msg = `Aufnahme fuer **${channel.name}** gestartet!`;
+            else if (result === 'already_active') msg = `Aufnahme fuer **${channel.name}** ist bereits aktiv.`;
+            else if (result === 'max_reached') msg = `Maximale Anzahl an Aufnahmen erreicht!`;
+            else msg = `Fehler beim Starten der Aufnahme in **${channel.name}**! Siehe Logs.`;
 
-            await interaction.reply({ content: msg, ephemeral: false });
+            await interaction.editReply({ content: msg });
         }
 
         if (subcommand === 'all') {
@@ -546,14 +558,16 @@ client.on('interactionCreate', async (interaction) => {
             recordChannelConfig.channels = [];
             saveRecordChannels();
 
-            // Start recording in all channels with users
             const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
             let count = 0;
+            let errors = 0;
             for (const [, channel] of voiceChannels) {
-                if (await startRecordingForChannel(channel, guild, true)) count++;
+                const res = await startRecordingForChannel(channel, guild, true);
+                if (res === 'started') count++;
+                else if (res === 'error') errors++;
             }
 
-            await interaction.reply({ content: `Aufnahme fuer **alle Voice-Channels** aktiviert!\nBot in ${count} Channels.`, ephemeral: false });
+            await interaction.editReply({ content: `Aufnahme fuer **alle Voice-Channels** aktiviert!\nBot in ${count} Channels gestartet. ${errors > 0 ? `(${errors} Fehler)` : ''}` });
         }
 
         if (subcommand === 'stop') {
@@ -561,7 +575,7 @@ client.on('interactionCreate', async (interaction) => {
             const channel = guild.channels.cache.get(channelId);
 
             if (!channel || channel.type !== 2) {
-                return interaction.reply({ content: 'Ungueltiger Voice-Channel!', ephemeral: true });
+                return interaction.editReply({ content: 'Ungueltiger Voice-Channel!' });
             }
 
             // Remove from config
@@ -571,9 +585,9 @@ client.on('interactionCreate', async (interaction) => {
             // Stop recording if active
             if (activeRecordings.has(channelId)) {
                 const count = await stopRecordingForChannel(channelId);
-                await interaction.reply({ content: `Aufnahme in **${channel.name}** gestoppt!\n${count} Sprecher gespeichert.`, ephemeral: false });
+                await interaction.editReply({ content: `Aufnahme in **${channel.name}** gestoppt!\n${count} Sprecher gespeichert.` });
             } else {
-                await interaction.reply({ content: `Keine aktive Aufnahme in **${channel.name}**.`, ephemeral: true });
+                await interaction.editReply({ content: `Keine aktive Aufnahme in **${channel.name}**.` });
             }
         }
 
@@ -597,7 +611,7 @@ client.on('interactionCreate', async (interaction) => {
                 embed.addFields({ name: 'Aktiv', value: 'Keine Aufnahme', inline: false });
             }
 
-            await interaction.reply({ embeds: [embed] });
+            await interaction.editReply({ embeds: [embed] });
         }
     }
 
@@ -678,7 +692,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         if (!activeRecordings.has(channelId)) {
             const channel = newState.channel;
             if (channel) {
-                await startRecordingForChannel(channel, guild, true);
+                startRecordingForChannel(channel, guild, true).catch(e => console.error('[Voice] Auto-Start Error:', e));
             }
         }
     }
@@ -691,13 +705,16 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             users.delete(userId);
         }
 
-        // Check if channel is empty
+        // Check if channel is empty (only bot left)
         const channel = guild.channels.cache.get(channelId);
-        if (channel && channel.members.size === 0 && activeRecordings.has(channelId)) {
+        const humanCount = channel ? channel.members.filter(m => !m.user.bot).size : 0;
+        
+        if (humanCount === 0 && activeRecordings.has(channelId)) {
             // Wait a bit to see if someone rejoins
             setTimeout(async () => {
                 const ch = guild.channels.cache.get(channelId);
-                if (ch && ch.members.size === 0 && activeRecordings.has(channelId)) {
+                const currentHumanCount = ch ? ch.members.filter(m => !m.user.bot).size : 0;
+                if (currentHumanCount === 0 && activeRecordings.has(channelId)) {
                     await stopRecordingForChannel(channelId);
                 }
             }, 5000);
@@ -713,10 +730,12 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
 
         const oldChannel = guild.channels.cache.get(oldState.channelId);
-        if (oldChannel && oldChannel.members.size === 0 && activeRecordings.has(oldState.channelId)) {
+        const oldHumanCount = oldChannel ? oldChannel.members.filter(m => !m.user.bot).size : 0;
+        if (oldHumanCount === 0 && activeRecordings.has(oldState.channelId)) {
             setTimeout(async () => {
                 const ch = guild.channels.cache.get(oldState.channelId);
-                if (ch && ch.members.size === 0 && activeRecordings.has(oldState.channelId)) {
+                const currentHumanCount = ch ? ch.members.filter(m => !m.user.bot).size : 0;
+                if (currentHumanCount === 0 && activeRecordings.has(oldState.channelId)) {
                     await stopRecordingForChannel(oldState.channelId);
                 }
             }, 5000);
@@ -732,7 +751,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             if (!activeRecordings.has(newState.channelId)) {
                 const newChannel = newState.channel;
                 if (newChannel) {
-                    await startRecordingForChannel(newChannel, guild, true);
+                    startRecordingForChannel(newChannel, guild, true).catch(e => console.error('[Voice] Auto-Start Error:', e));
                 }
             }
         }
