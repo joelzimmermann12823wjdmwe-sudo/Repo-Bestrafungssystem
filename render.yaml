@@ -24,6 +24,12 @@ services:
         sync: false
       - key: WEB_PASSWORD
         sync: false
+      - key: GOOGLE_CLIENT_EMAIL
+        sync: false
+      - key: GOOGLE_PRIVATE_KEY
+        sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false
     disk:
       name: punishment-data
       mountPath: /opt/render/project/src/data

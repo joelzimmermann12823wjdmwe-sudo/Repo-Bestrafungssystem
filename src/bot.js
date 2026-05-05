@@ -6,6 +6,7 @@ const fs = require('fs');
 const { join } = require('path');
 const Opus = require('opusscript');
 const startWebServer = require('./server');
+const { uploadToGoogleDrive } = require('./gdrive');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 if (!TOKEN) {
@@ -385,6 +386,7 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
             guildId: guild.id,
             channelName: channel.name,
             folderName,
+            outputDir,
             autoManaged
         });
 
@@ -411,6 +413,15 @@ async function stopRecordingForChannel(channelId) {
     activeRecordings.delete(channelId);
     channelUsers.delete(channelId);
     console.log(`[Record] Stopped ${session.folderName} (${count} speakers)`);
+
+    // Upload to Google Drive
+    if (count > 0) {
+        const uploaded = await uploadToGoogleDrive(session.outputDir, session.folderName);
+        if (uploaded) {
+            console.log(`[Drive] Upload complete: ${session.folderName}`);
+        }
+    }
+
     return count;
 }
 
