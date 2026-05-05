@@ -9,7 +9,7 @@ const crypto = require('crypto');
 function startWebServer(client, activeRecordings, TALKS_DIR) {
     const app = express();
     const webPort = parseInt(process.env.PORT) || 8080;
-    const webHost = process.env.WEB_HOST || '0.0.0.0';
+    const webHost = '0.0.0.0';
     const webUsername = process.env.WEB_USERNAME || 'admin';
     const webPassword = process.env.WEB_PASSWORD || 'admin123';
 
@@ -98,7 +98,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
     function requireAuth(req, res, next) {
         if (getSession(req)) return next();
-        const publicPaths = ['/login', '/api/login', '/health', '/css', '/js'];
+        const publicPaths = ['/login', '/api/login', '/css', '/js'];
         if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/')) || req.path === '/favicon.ico') {
             return next();
         }
@@ -108,17 +108,12 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
         return res.redirect('/login');
     }
 
-    app.use(requireAuth);
-
-    // Health endpoint
+    // Health endpoint - BEFORE auth middleware for Render
     app.get('/health', (req, res) => {
-        res.json({
-            status: 'healthy',
-            bot: client.user ? client.user.tag : 'offline',
-            recordings: activeRecordings.size,
-            uptime: process.uptime()
-        });
+        res.status(200).json({ status: 'healthy' });
     });
+
+    app.use(requireAuth);
 
     function getRecordingFolders() {
         if (!fs.existsSync(TALKS_DIR)) return [];
