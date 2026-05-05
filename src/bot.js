@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Collection, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, REST, Routes, ActionRowBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder } = require('discord.js');
 const { joinVoiceChannel, VoiceConnectionStatus, entersState, EndBehaviorType } = require('@discordjs/voice');
 const { mkdir, writeFile, readFile, stat } = require('fs/promises');
 const fs = require('fs');
@@ -302,15 +302,150 @@ class VoiceRecorder {
     getUserCount() { return this.userRecordings.size; }
 }
 
-// Multi-channel support: key is sessionId (not guildId)
+// Active recordings by channel ID (allows direct lookup)
 const activeRecordings = new Map();
+// Map: channelId -> { connection, recorder, startTime, guildId, channelName, folderName, autoManaged }
 const speakingListeners = new Map();
-let sessionIdCounter = 0;
+
+const RECORD_CHANNELS_FILE = join(DATA_DIR, 'record_channels.json');
+let recordChannelConfig = { channels: [], recordAll: false };
+
+function loadRecordChannels() {
+    try {
+        if (fs.existsSync(RECORD_CHANNELS_FILE)) {
+            recordChannelConfig = JSON.parse(fs.readFileSync(RECORD_CHANNELS_FILE, 'utf-8'));
+        }
+    } catch {}
+    console.log(`[Record] ${recordChannelConfig.recordAll ? 'Alle Channels' : recordChannelConfig.channels.length + ' Channels'} konfiguriert`);
+}
+
+function saveRecordChannels() {
+    try {
+        fs.writeFileSync(RECORD_CHANNELS_FILE, JSON.stringify(recordChannelConfig, null, 2));
+    } catch {}
+}
+
+loadRecordChannels();
+
+// Track which users are in which channels for auto-leave detection
+const channelUsers = new Map(); // channelId -> Set<userId>
+
+function shouldRecordChannel(channelId) {
+    if (recordChannelConfig.recordAll) return true;
+    return recordChannelConfig.channels.includes(channelId);
+}
+
+async function startRecordingForChannel(channel, guild, autoManaged = true) {
+    if (activeRecordings.has(channel.id)) return false;
+
+    if (activeRecordings.size >= MAX_RECORDINGS) {
+        console.log(`[Record] Max recordings reached (${MAX_RECORDINGS})`);
+        return false;
+    }
+
+    const folderName = getNextFolderName();
+    const outputDir = join(TALKS_DIR, folderName);
+
+    try {
+        await mkdir(outputDir, { recursive: true });
+    } catch {
+        return false;
+    }
+
+    try {
+        const connection = joinVoiceChannel({
+            channelId: channel.id,
+            guildId: guild.id,
+            adapterCreator: guild.voiceAdapterCreator,
+            selfDeaf: false,
+            selfMute: true,
+        });
+        await entersState(connection, VoiceConnectionStatus.Ready, 20000);
+        console.log(`[Voice] ${channel.name} (${folderName})`);
+
+        const recorder = new VoiceRecorder(outputDir);
+        const receiver = connection.receiver;
+        const speakingHandler = async (userId) => {
+            if (recorder.userRecordings.has(userId)) return;
+            try {
+                const m = await guild.members.fetch(userId).catch(() => null);
+                const username = m?.user.username || `user_${userId}`;
+                recorder.startUserStream(receiver, userId, username);
+            } catch (err) {
+                console.error(`[Fehler] ${userId}:`, err.message);
+            }
+        };
+        receiver.speaking.on('start', speakingHandler);
+
+        speakingListeners.set(channel.id, { receiver, handler: speakingHandler });
+        activeRecordings.set(channel.id, {
+            connection,
+            recorder,
+            startTime: Date.now(),
+            guildId: guild.id,
+            channelName: channel.name,
+            folderName,
+            autoManaged
+        });
+
+        console.log(`[Record] Started in ${channel.name}`);
+        return true;
+    } catch (error) {
+        console.error(`[Fehler] Start ${channel.name}:`, error.message);
+        return false;
+    }
+}
+
+async function stopRecordingForChannel(channelId) {
+    const session = activeRecordings.get(channelId);
+    if (!session) return 0;
+
+    const listener = speakingListeners.get(channelId);
+    if (listener) {
+        listener.receiver.speaking.removeListener('start', listener.handler);
+        speakingListeners.delete(channelId);
+    }
+
+    session.connection.destroy();
+    const count = await session.recorder.saveAll();
+    activeRecordings.delete(channelId);
+    channelUsers.delete(channelId);
+    console.log(`[Record] Stopped ${session.folderName} (${count} speakers)`);
+    return count;
+}
 
 const commands = [
-    new SlashCommandBuilder().setName('talk_start').setDescription('Startet die Voice-Aufnahme'),
-    new SlashCommandBuilder().setName('talk_stop').setDescription('Stoppt die Voice-Aufnahme'),
-    new SlashCommandBuilder().setName('talk_status').setDescription('Zeigt Aufnahme-Status'),
+    new SlashCommandBuilder()
+        .setName('record')
+        .setDescription('Waehle Channels zum Aufnehmen')
+        .addSubcommand(sub =>
+            sub.setName('channel')
+                .setDescription('Waehle einen Channel zum Aufnehmen')
+                .addStringOption(opt =>
+                    opt.setName('channel')
+                        .setDescription('Voice-Channel')
+                        .setRequired(true)
+                        .setAutocomplete(true)
+                )
+        )
+        .addSubcommand(sub =>
+            sub.setName('all')
+                .setDescription('Nimmt alle Voice-Channels auf')
+        )
+        .addSubcommand(sub =>
+            sub.setName('stop')
+                .setDescription('Stoppt die Aufnahme in einem Channel')
+                .addStringOption(opt =>
+                    opt.setName('channel')
+                        .setDescription('Channel-Name oder ID')
+                        .setRequired(true)
+                        .setAutocomplete(true)
+                )
+        )
+        .addSubcommand(sub =>
+            sub.setName('status')
+                .setDescription('Zeigt Aufnahme-Status')
+        ),
     new SlashCommandBuilder()
         .setName('bestrafung')
         .setDescription('Bestraft einen User')
@@ -333,168 +468,123 @@ const client = new Client({
 client.commands = new Collection();
 let punishmentManager;
 
+// Autocomplete for channel selection
 client.on('interactionCreate', async (interaction) => {
+    if (interaction.isAutocomplete()) {
+        const focused = interaction.options.getFocused(true);
+        if (focused.name === 'channel') {
+            const guild = interaction.guild;
+            if (!guild) return interaction.respond([]);
+
+            const channels = guild.channels.cache
+                .filter(ch => ch.type === 2) // Voice channels
+                .map(ch => ({ name: `${ch.name} (${ch.id})`, value: ch.id }));
+
+            const query = focused.value.toLowerCase();
+            const filtered = query ? channels.filter(ch => ch.name.toLowerCase().includes(query)) : channels;
+
+            await interaction.respond(filtered.slice(0, 25));
+        }
+        return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
-    const { commandName, guildId } = interaction;
+    const { commandName } = interaction;
 
-    if (commandName === 'talk_start') {
-        const member = interaction.member;
-        if (!member.voice?.channelId) {
-            return interaction.reply({ content: 'Du bist in keinem Voice-Channel!', ephemeral: true });
+    if (commandName === 'record') {
+        const subcommand = interaction.options.getSubcommand();
+        const guild = interaction.guild;
+
+        if (!guild) {
+            return interaction.reply({ content: 'Nur in einem Server verfuegbar!', ephemeral: true });
         }
 
-        // Count active recordings in this guild
-        let guildRecordings = 0;
-        for (const [, session] of activeRecordings) {
-            if (session.guildId === guildId) guildRecordings++;
-        }
-        if (guildRecordings >= MAX_RECORDINGS) {
-            return interaction.reply({ content: `Maximal ${MAX_RECORDINGS} Aufnahmen gleichzeitig!`, ephemeral: true });
+        const isAdmin = interaction.member.roles.cache.some(r => ADMIN_ROLE_IDS.includes(r.id));
+        if (!isAdmin && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Keine Berechtigung!', ephemeral: true });
         }
 
-        // Check if user is already in an active recording
-        for (const [, session] of activeRecordings) {
-            if (session.guildId === guildId && session.channelId === member.voice.channelId) {
-                return interaction.reply({ content: 'Dieser Channel wird bereits aufgenommen!', ephemeral: true });
+        if (subcommand === 'channel') {
+            const channelId = interaction.options.getString('channel');
+            const channel = guild.channels.cache.get(channelId);
+
+            if (!channel || channel.type !== 2) {
+                return interaction.reply({ content: 'Ungueltiger Voice-Channel!', ephemeral: true });
             }
-        }
 
-        await interaction.deferReply();
-        const channel = member.voice.channel;
-        const folderName = getNextFolderName();
-        const outputDir = join(TALKS_DIR, folderName);
-
-        try {
-            await mkdir(outputDir, { recursive: true });
-        } catch (err) {
-            return interaction.editReply(`Fehler: Ordner erstellen fehlgeschlagen`);
-        }
-
-        try {
-            const connection = joinVoiceChannel({
-                channelId: channel.id, guildId,
-                adapterCreator: interaction.guild.voiceAdapterCreator,
-                selfDeaf: false, selfMute: true,
-            });
-            await entersState(connection, VoiceConnectionStatus.Ready, 20000);
-            console.log(`[Voice] ${channel.name} (${folderName})`);
-
-            const sessionId = `session_${++sessionIdCounter}`;
-            const recorder = new VoiceRecorder(outputDir);
-            const receiver = connection.receiver;
-            const speakingHandler = async (userId) => {
-                if (recorder.userRecordings.has(userId)) return;
-                try {
-                    const m = await interaction.guild.members.fetch(userId).catch(() => null);
-                    const username = m?.user.username || `user_${userId}`;
-                    recorder.startUserStream(receiver, userId, username);
-                } catch (err) {
-                    console.error(`[Fehler] ${userId}:`, err.message);
-                }
-            };
-            receiver.speaking.on('start', speakingHandler);
-
-            speakingListeners.set(sessionId, { receiver, handler: speakingHandler });
-            activeRecordings.set(sessionId, {
-                connection, recorder, startTime: Date.now(),
-                guildId, channelId: channel.id, channelName: channel.name, folderName
-            });
-
-            await interaction.editReply(
-                `Aufnahme in **${channel.name}** gestartet!\nOrdner: \`${folderName}\``
-            );
-        } catch (error) {
-            console.error('[Fehler] Start:', error);
-            await interaction.editReply(`Fehler: ${error.message}`);
-        }
-    }
-
-    if (commandName === 'talk_stop') {
-        // Find all recordings in this guild
-        const guildSessions = [];
-        for (const [id, session] of activeRecordings) {
-            if (session.guildId === guildId) {
-                guildSessions.push({ id, ...session });
+            if (!recordChannelConfig.channels.includes(channelId)) {
+                recordChannelConfig.channels.push(channelId);
+                saveRecordChannels();
             }
-        }
 
-        if (guildSessions.length === 0) {
-            return interaction.reply({ content: 'Keine Aufnahme in diesem Server!', ephemeral: true });
-        }
-
-        if (guildSessions.length === 1) {
-            const session = guildSessions[0];
-            await interaction.deferReply();
-            try {
-                const listener = speakingListeners.get(session.id);
-                if (listener) {
-                    listener.receiver.speaking.removeListener('start', listener.handler);
-                    speakingListeners.delete(session.id);
-                }
-                session.connection.destroy();
-                const count = await session.recorder.saveAll();
-                activeRecordings.delete(session.id);
-                await interaction.editReply(`Aufnahme **${session.folderName}** beendet!\n${count} Sprecher.`);
-            } catch (error) {
-                console.error('[Fehler] Stop:', error);
-                await interaction.editReply(`Fehler: ${error.message}`);
+            // If someone is already in the channel, start recording immediately
+            const members = channel.members;
+            if (members.size > 0 && !activeRecordings.has(channelId)) {
+                await startRecordingForChannel(channel, guild, true);
             }
-        } else {
-            // Multiple recordings: let user choose which one to stop
-            const channel = interaction.member.voice.channel;
-            const matchingSession = guildSessions.find(s => s.channelId === channel?.id);
 
-            if (matchingSession) {
-                await interaction.deferReply();
-                try {
-                    const listener = speakingListeners.get(matchingSession.id);
-                    if (listener) {
-                        listener.receiver.speaking.removeListener('start', listener.handler);
-                        speakingListeners.delete(matchingSession.id);
-                    }
-                    matchingSession.connection.destroy();
-                    const count = await matchingSession.recorder.saveAll();
-                    activeRecordings.delete(matchingSession.id);
-                    await interaction.editReply(`Aufnahme **${matchingSession.folderName}** (${matchingSession.channelName}) beendet!\n${count} Sprecher.`);
-                } catch (error) {
-                    console.error('[Fehler] Stop:', error);
-                    await interaction.editReply(`Fehler: ${error.message}`);
+            await interaction.reply({ content: `Aufnahme fuer **${channel.name}** aktiviert!\nBot nimmt automatisch auf wenn User joinen.`, ephemeral: false });
+        }
+
+        if (subcommand === 'all') {
+            recordChannelConfig.recordAll = true;
+            recordChannelConfig.channels = [];
+            saveRecordChannels();
+
+            // Start recording in all channels with users
+            const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
+            for (const [, channel] of voiceChannels) {
+                if (channel.members.size > 0 && !activeRecordings.has(channel.id)) {
+                    await startRecordingForChannel(channel, guild, true);
                 }
+            }
+
+            await interaction.reply({ content: 'Aufnahme fuer **alle Voice-Channels** aktiviert!', ephemeral: false });
+        }
+
+        if (subcommand === 'stop') {
+            const channelId = interaction.options.getString('channel');
+            const channel = guild.channels.cache.get(channelId);
+
+            if (!channel || channel.type !== 2) {
+                return interaction.reply({ content: 'Ungueltiger Voice-Channel!', ephemeral: true });
+            }
+
+            // Remove from config
+            recordChannelConfig.channels = recordChannelConfig.channels.filter(id => id !== channelId);
+            saveRecordChannels();
+
+            // Stop recording if active
+            if (activeRecordings.has(channelId)) {
+                const count = await stopRecordingForChannel(channelId);
+                await interaction.reply({ content: `Aufnahme in **${channel.name}** gestoppt!\n${count} Sprecher gespeichert.`, ephemeral: false });
             } else {
-                // Stop all or show list
-                const embed = new EmbedBuilder()
-                    .setColor(0xffaa00).setTitle('Laufende Aufnahmen')
-                    .setDescription(`Es laufen ${guildSessions.length} Aufnahmen. Gehe in den Channel den du stoppen willst, oder nutze \`/talk_stop_all\`.`);
-                for (const s of guildSessions) {
-                    const dur = Math.floor((Date.now() - s.startTime) / 1000);
-                    embed.addFields({
-                        name: s.folderName,
-                        value: `Channel: ${s.channelName}\nDauer: ${dur}s | ${s.recorder.getUserCount()} User`,
-                        inline: false
-                    });
-                }
-                return interaction.reply({ embeds: [embed], ephemeral: true });
+                await interaction.reply({ content: `Keine aktive Aufnahme in **${channel.name}**.`, ephemeral: true });
             }
         }
-    }
 
-    if (commandName === 'talk_status') {
-        const allSessions = Array.from(activeRecordings.values());
-        if (allSessions.length === 0) {
-            return interaction.reply('Keine Aufnahme aktiv');
+        if (subcommand === 'status') {
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00)
+                .setTitle('Aufnahme-Status')
+                .setDescription(recordChannelConfig.recordAll ? 'Modus: **Alle Channels**' : `Modus: **${recordChannelConfig.channels.length} Channels**`);
+
+            if (activeRecordings.size > 0) {
+                let desc = '';
+                for (const [, session] of activeRecordings) {
+                    const dur = Math.floor((Date.now() - session.startTime) / 1000);
+                    const mins = Math.floor(dur / 60);
+                    const secs = dur % 60;
+                    const users = channelUsers.get(session.channelId)?.size || 0;
+                    desc += `\n**${session.channelName}** - ${mins}m ${secs}s - ${users} User - \`${session.folderName}\``;
+                }
+                embed.addFields({ name: `Aktiv (${activeRecordings.size})`, value: desc, inline: false });
+            } else {
+                embed.addFields({ name: 'Aktiv', value: 'Keine Aufnahme', inline: false });
+            }
+
+            await interaction.reply({ embeds: [embed] });
         }
-        const embed = new EmbedBuilder()
-            .setColor(0x00ff00).setTitle('Aktive Aufnahmen')
-            .setDescription(`${allSessions.length} von ${MAX_RECORDINGS} Slots belegt`);
-        for (const s of allSessions) {
-            const dur = Math.floor((Date.now() - s.startTime) / 1000);
-            embed.addFields({
-                name: s.folderName,
-                value: `Channel: ${s.channelName}\nDauer: ${dur}s | ${s.recorder.getUserCount()} User`,
-                inline: false
-            });
-        }
-        return interaction.reply({ embeds: [embed] });
     }
 
     if (commandName === 'bestrafung') {
@@ -552,6 +642,89 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
+// Voice state updates - auto join/leave
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    const guild = newState.guild || oldState.guild;
+    if (GUILD_ID && guild.id !== GUILD_ID) return;
+
+    const userId = newState.id || oldState.id;
+    if (userId === client.user.id) return; // Ignore bot's own voice changes
+
+    // User joined a channel
+    if (newState.channelId && !oldState.channelId) {
+        const channelId = newState.channelId;
+        if (!shouldRecordChannel(channelId)) return;
+
+        if (!channelUsers.has(channelId)) {
+            channelUsers.set(channelId, new Set());
+        }
+        channelUsers.get(channelId).add(userId);
+
+        // Start recording if not already recording
+        if (!activeRecordings.has(channelId)) {
+            const channel = newState.channel;
+            if (channel) {
+                await startRecordingForChannel(channel, guild, true);
+            }
+        }
+    }
+
+    // User left a channel
+    if (oldState.channelId && !newState.channelId) {
+        const channelId = oldState.channelId;
+        const users = channelUsers.get(channelId);
+        if (users) {
+            users.delete(userId);
+        }
+
+        // Check if channel is empty
+        const channel = guild.channels.cache.get(channelId);
+        if (channel && channel.members.size === 0 && activeRecordings.has(channelId)) {
+            // Wait a bit to see if someone rejoins
+            setTimeout(async () => {
+                const ch = guild.channels.cache.get(channelId);
+                if (ch && ch.members.size === 0 && activeRecordings.has(channelId)) {
+                    await stopRecordingForChannel(channelId);
+                }
+            }, 5000);
+        }
+    }
+
+    // User switched channels
+    if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+        // Handle leaving old channel
+        const oldChannelUsers = channelUsers.get(oldState.channelId);
+        if (oldChannelUsers) {
+            oldChannelUsers.delete(userId);
+        }
+
+        const oldChannel = guild.channels.cache.get(oldState.channelId);
+        if (oldChannel && oldChannel.members.size === 0 && activeRecordings.has(oldState.channelId)) {
+            setTimeout(async () => {
+                const ch = guild.channels.cache.get(oldState.channelId);
+                if (ch && ch.members.size === 0 && activeRecordings.has(oldState.channelId)) {
+                    await stopRecordingForChannel(oldState.channelId);
+                }
+            }, 5000);
+        }
+
+        // Handle joining new channel
+        if (shouldRecordChannel(newState.channelId)) {
+            if (!channelUsers.has(newState.channelId)) {
+                channelUsers.set(newState.channelId, new Set());
+            }
+            channelUsers.get(newState.channelId).add(userId);
+
+            if (!activeRecordings.has(newState.channelId)) {
+                const newChannel = newState.channel;
+                if (newChannel) {
+                    await startRecordingForChannel(newChannel, guild, true);
+                }
+            }
+        }
+    }
+});
+
 client.once('clientReady', async () => {
     console.log(`Bot online: ${client.user.tag}`);
     punishmentManager = new PunishmentManager(STRAFEN_FILE);
@@ -570,6 +743,16 @@ client.once('clientReady', async () => {
     const guild = GUILD_ID ? client.guilds.cache.get(GUILD_ID) : client.guilds.cache.first();
     for (const p of punishmentManager.getActivePunishments()) {
         punishmentManager.scheduleRestore(p, guild);
+    }
+
+    // Resume recordings for channels that still have users
+    if (guild && recordChannelConfig.channels.length > 0 || recordChannelConfig.recordAll) {
+        const voiceChannels = guild.channels.cache.filter(ch => ch.type === 2);
+        for (const [, channel] of voiceChannels) {
+            if (channel.members.size > 0 && shouldRecordChannel(channel.id)) {
+                await startRecordingForChannel(channel, guild, true);
+            }
+        }
     }
 });
 
