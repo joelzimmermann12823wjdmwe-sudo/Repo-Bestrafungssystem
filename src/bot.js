@@ -868,36 +868,30 @@ client.once('clientReady', async () => {
 
 startWebServer(client, activeRecordings, TALKS_DIR);
 
-// Keep-Alive: Self-ping alle 2 Min, Interaktion alle 3 Min
+// Keep-Alive: Ping alle 30 Sekunden (verhindert Render-Sleep)
+const EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://repo-bestrafungssystem-abe9.onrender.com';
 const SELF_URL = `http://localhost:${PORT}`;
 
-setInterval(() => {
-    http.get(`${SELF_URL}/health`, (res) => {
-        res.on('data', () => {});
-        res.on('end', () => {
-            console.log('[Keep-Alive] Health-Check OK');
-        });
-    }).on('error', (e) => {
-        console.log('[Keep-Alive] Health-Check Error:', e.message);
-    });
-}, 2 * 60 * 1000); // Alle 2 Min
-
-setInterval(() => {
-    http.get(`${SELF_URL}/api/status`, (res) => {
+function ping(url, label) {
+    http.get(url, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
-            try {
-                const status = JSON.parse(data);
-                console.log(`[Keep-Alive] Status: Bot=${status.bot}, Recordings=${status.activeRecordings}`);
-            } catch {
-                console.log('[Keep-Alive] Status-Check OK');
-            }
+            console.log(`[Keep-Alive] ${label} OK (${res.statusCode})`);
         });
     }).on('error', (e) => {
-        console.log('[Keep-Alive] Status-Check Error:', e.message);
+        console.log(`[Keep-Alive] ${label} Error: ${e.message}`);
     });
-}, 3 * 60 * 1000); // Alle 3 Min
+}
+
+// Health-Check alle 30s
+setInterval(() => ping(`${SELF_URL}/health`, 'Health'), 30 * 1000);
+
+// External-URL alle 2 Min (verhindert Render-Timeout)
+setInterval(() => ping(`${EXTERNAL_URL}/health`, 'External'), 2 * 60 * 1000);
+
+// Status-Check alle 3 Min
+setInterval(() => ping(`${SELF_URL}/api/status`, 'Status'), 3 * 60 * 1000);
 
 client.login(TOKEN).catch(err => {
     console.error('[FATAL]', err.message);
