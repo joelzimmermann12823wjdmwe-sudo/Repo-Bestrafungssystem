@@ -557,6 +557,22 @@ body {
 .log-type.voice_join { background: rgba(87,242,135,0.15); color: var(--success); }
 .log-type.voice_leave { background: rgba(254,231,92,0.15); color: var(--warning); }
 .log-type.voice_move { background: rgba(88,101,242,0.15); color: #8b9aff; }
+.log-type.msg_delete { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.msg_edit { background: rgba(254,231,92,0.15); color: var(--warning); }
+.log-type.ban { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.unban { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.member_remove { background: rgba(254,231,92,0.15); color: var(--warning); }
+.log-type.timeout { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.untimeout { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.role_add { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.role_remove { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.role_create { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.role_delete { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.channel_rename { background: rgba(88,101,242,0.15); color: #8b9aff; }
+.log-type.channel_change { background: rgba(88,101,242,0.15); color: #8b9aff; }
+.log-type.channel_create { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.channel_delete { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.command { background: rgba(88,101,242,0.15); color: #8b9aff; }
 
 .log-user {
     color: var(--accent);

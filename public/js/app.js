@@ -343,6 +343,7 @@ setInterval(loadRecordings, 60000);
 
 let logTypes = [];
 let logUsers = [];
+let logEventSource = null;
 
 async function loadLogs() {
     const type = document.getElementById('log-filter-type').value;
@@ -375,14 +376,109 @@ async function loadLogs() {
         var currentType = typeSelect.value;
         typeSelect.innerHTML = '<option value="">Alle</option>' +
             logTypes.map(function(t) {
-                return '<option value="' + escapeHtml(t) + '"' + (t === currentType ? ' selected' : '') + '>' + escapeHtml(t) + '</option>';
+                return '<option value="' + escapeHtml(t) + '"' + (t === currentType ? ' selected' : '') + '>' + escapeHtml(logTypeLabel(t)) + '</option>';
             }).join('');
 
         renderLogs(data.logs);
+        connectLogStream();
     } catch (err) {
         document.getElementById('log-loading').classList.add('hidden');
         document.getElementById('logs-list').innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
     }
+}
+
+function logTypeLabel(type) {
+    var labels = {
+        'login': 'Login',
+        'login_failed': 'Fehler',
+        'logout': 'Logout',
+        'discord_login': 'Discord',
+        'download': 'Download',
+        'delete_folder': 'Löschen',
+        'delete_file': 'Löschen',
+        'error': 'Fehler',
+        'voice_join': 'Beitritt',
+        'voice_leave': 'Verlassen',
+        'voice_move': 'Wechsel',
+        'msg_delete': 'Nachricht gelöscht',
+        'msg_edit': 'Nachricht bearbeitet',
+        'ban': 'Ban',
+        'unban': 'Entbann',
+        'member_remove': 'Member entfernt',
+        'timeout': 'Timeout',
+        'untimeout': 'Enttimeout',
+        'role_add': 'Rolle +',
+        'role_remove': 'Rolle -',
+        'role_create': 'Rolle erstellt',
+        'role_delete': 'Rolle gelöscht',
+        'channel_rename': 'Channel umbenannt',
+        'channel_change': 'Channel geändert',
+        'channel_create': 'Channel erstellt',
+        'channel_delete': 'Channel gelöscht',
+        'command': 'Befehl'
+    };
+    return labels[type] || type;
+}
+
+function connectLogStream() {
+    if (logEventSource) { logEventSource.close(); logEventSource = null; }
+    logEventSource = new EventSource('/api/logs/stream');
+    logEventSource.onmessage = function(e) {
+        try {
+            var entry = JSON.parse(e.data);
+            if (entry.type === 'connected') return;
+            prependLogEntry(entry);
+        } catch(err) {}
+    };
+    logEventSource.onerror = function() {
+        // Auto-reconnect nach 3s
+        setTimeout(function() {
+            if (logEventSource) connectLogStream();
+        }, 3000);
+    };
+}
+
+function disconnectLogStream() {
+    if (logEventSource) { logEventSource.close(); logEventSource = null; }
+}
+
+function prependLogEntry(entry) {
+    // Prüfen ob Eintrag zu aktuellen Filtern passt
+    var typeFilter = document.getElementById('log-filter-type').value;
+    var userFilter = document.getElementById('log-filter-user').value.toLowerCase();
+    var fromFilter = document.getElementById('log-filter-from').value;
+    var toFilter = document.getElementById('log-filter-to').value;
+
+    if (typeFilter && entry.type !== typeFilter) return;
+    if (userFilter && !(entry.username || '').toLowerCase().includes(userFilter)) return;
+    if (fromFilter && new Date(entry.timestamp) < new Date(fromFilter)) return;
+    if (toFilter && new Date(entry.timestamp) > new Date(toFilter + 'T23:59:59')) return;
+
+    var list = document.getElementById('logs-list');
+    var empty = list.querySelector('.empty-state');
+    if (empty) list.innerHTML = '';
+
+    var type = entry.type || '';
+    var typeClass = 'log-type ' + type;
+    var safeTime = escapeHtml(formatDateTime(entry.timestamp));
+    var safeType = escapeHtml(logTypeLabel(type));
+    var safeUser = escapeHtml(entry.username || '');
+    var safeMsg = escapeHtml(entry.message || '');
+
+    var el = document.createElement('div');
+    el.className = 'log-entry';
+    el.innerHTML =
+        '<span class="log-time">' + safeTime + '</span>' +
+        '<span class="' + typeClass + '">' + safeType + '</span>' +
+        '<span class="log-user">' + safeUser + '</span>' +
+        '<span class="log-msg" title="' + safeMsg + '">' + safeMsg + '</span>';
+
+    list.insertBefore(el, list.firstChild);
+
+    // Zähler aktualisieren
+    var countEl = document.getElementById('log-count');
+    var current = parseInt(countEl.textContent) || 0;
+    countEl.textContent = (current + 1) + ' Einträge';
 }
 
 function renderLogs(logs) {
@@ -395,22 +491,9 @@ function renderLogs(logs) {
 
     list.innerHTML = logs.map(function(entry) {
         var type = entry.type || '';
-        var typeLabels = {
-            'login': 'Login',
-            'login_failed': 'Fehler',
-            'logout': 'Logout',
-            'discord_login': 'Discord',
-            'download': 'Download',
-            'delete_folder': 'Löschen',
-            'delete_file': 'Löschen',
-            'error': 'Fehler',
-            'voice_join': 'Beitritt',
-            'voice_leave': 'Verlassen',
-            'voice_move': 'Wechsel'
-        };
         var typeClass = 'log-type ' + type;
         var safeTime = escapeHtml(formatDateTime(entry.timestamp));
-        var safeType = escapeHtml(typeLabels[type] || type);
+        var safeType = escapeHtml(logTypeLabel(type));
         var safeUser = escapeHtml(entry.username || '');
         var safeMsg = escapeHtml(entry.message || '');
 
@@ -434,6 +517,7 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
         document.querySelectorAll('[id^="tab-"]').forEach(function(el) { el.classList.add('hidden'); });
         document.getElementById('tab-' + tab).classList.remove('hidden');
         if (tab === 'logs') loadLogs();
+        else disconnectLogStream();
     });
 });
 

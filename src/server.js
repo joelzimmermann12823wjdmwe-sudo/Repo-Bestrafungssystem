@@ -82,6 +82,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
     // Audit-Log (append-only, unloeschbar)
     const LOG_FILE = join(DATA_DIR, 'audit.log');
+    const logClients = []; // SSE clients
 
     function addLog(type, username, message, details) {
         try {
@@ -94,6 +95,16 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
                 details: details || null
             };
             fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n', 'utf-8');
+
+            // An alle SSE-Clients pushen
+            const payload = `data: ${JSON.stringify(entry)}\n\n`;
+            for (let i = logClients.length - 1; i >= 0; i--) {
+                try {
+                    logClients[i].write(payload);
+                } catch {
+                    logClients.splice(i, 1);
+                }
+            }
         } catch (err) {
             console.error('[Log] Fehler:', err.message);
         }
@@ -364,6 +375,23 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
         const types = [...new Set(loadLogs().map(l => l.type))].sort();
         const users = [...new Set(loadLogs().map(l => l.username).filter(Boolean))].sort();
         res.json({ logs, types, users });
+    });
+
+    // API: Logs Echtzeit-Stream (SSE)
+    app.get('/api/logs/stream', (req, res) => {
+        res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        });
+        res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+        logClients.push(res);
+        req.on('close', () => {
+            const idx = logClients.indexOf(res);
+            if (idx !== -1) logClients.splice(idx, 1);
+        });
     });
 
     // API: Download single file

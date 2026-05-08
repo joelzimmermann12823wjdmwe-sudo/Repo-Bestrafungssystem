@@ -955,6 +955,101 @@ client.once('clientReady', async () => {
 
 const { addLog } = startWebServer(client, activeRecordings, TALKS_DIR);
 
+// === Discord Ereignis-Logging ===
+
+// Nachrichten
+client.on('messageDelete', (message) => {
+    if (message.author?.bot) return;
+    addLog('msg_delete', message.author?.tag || 'unknown', `Nachricht gelöscht in #${message.channel?.name || 'unbekannt'}: "${message.content?.slice(0, 100) || 'kein Inhalt'}"`);
+});
+client.on('messageUpdate', (oldMsg, newMsg) => {
+    if (newMsg.author?.bot || !oldMsg.content || !newMsg.content) return;
+    if (oldMsg.content === newMsg.content) return;
+    addLog('msg_edit', newMsg.author?.tag || 'unknown', `Nachricht bearbeitet in #${newMsg.channel?.name || 'unbekannt'}`);
+});
+
+// Ban / Unban
+client.on('guildBanAdd', (guild, user) => {
+    if (GUILD_ID && guild.id !== GUILD_ID) return;
+    addLog('ban', user.tag, `${user.tag} wurde gebannt`);
+});
+client.on('guildBanRemove', (guild, user) => {
+    if (GUILD_ID && guild.id !== GUILD_ID) return;
+    addLog('unban', user.tag, `${user.tag} wurde entbannt`);
+});
+
+// Member kickt / verlässt
+client.on('guildMemberRemove', (member) => {
+    if (GUILD_ID && member.guild?.id !== GUILD_ID) return;
+    const auditLog = member.guild ? ' (möglicher Kick)' : '';
+    addLog('member_remove', member.user?.tag || 'unknown', `${member.user?.tag || 'Unbekannt'} hat den Server verlassen${auditLog}`);
+});
+
+// Timeout / Rolle / Member-Update
+client.on('guildMemberUpdate', (oldMember, newMember) => {
+    if (GUILD_ID && newMember.guild?.id !== GUILD_ID) return;
+    const tag = newMember.user?.tag || 'unknown';
+
+    // Timeout gesetzt
+    if (!oldMember.communicationDisabledUntil && newMember.communicationDisabledUntil) {
+        const until = new Date(newMember.communicationDisabledUntil).toLocaleString('de-DE');
+        addLog('timeout', 'system', `${tag} wurde bis ${until} stummgeschaltet`);
+    }
+    // Timeout entfernt
+    if (oldMember.communicationDisabledUntil && !newMember.communicationDisabledUntil) {
+        addLog('untimeout', 'system', `${tag} wurde entstummt`);
+    }
+
+    // Rollen geändert
+    const oldRoles = oldMember.roles.cache;
+    const newRoles = newMember.roles.cache;
+    const added = newRoles.filter(r => !oldRoles.has(r.id) && r.id !== newMember.guild?.id);
+    const removed = oldRoles.filter(r => !newRoles.has(r.id) && r.id !== newMember.guild?.id);
+    for (const [, role] of added) {
+        addLog('role_add', 'system', `${tag} hat Rolle @${role.name} erhalten`);
+    }
+    for (const [, role] of removed) {
+        addLog('role_remove', 'system', `${tag} hat Rolle @${role.name} verloren`);
+    }
+});
+
+// Channel geändert
+client.on('channelUpdate', (oldChannel, newChannel) => {
+    if (!oldChannel.name || !newChannel.name) return;
+    if (GUILD_ID && oldChannel.guild?.id !== GUILD_ID) return;
+    if (oldChannel.name !== newChannel.name) {
+        addLog('channel_rename', 'system', `Channel #${oldChannel.name} umbenannt in #${newChannel.name}`);
+    }
+    if (oldChannel.type !== newChannel.type) {
+        addLog('channel_change', 'system', `Channel #${newChannel.name} (Typ geändert)`);
+    }
+});
+client.on('channelCreate', (channel) => {
+    if (GUILD_ID && channel.guild?.id !== GUILD_ID) return;
+    addLog('channel_create', 'system', `Channel #${channel.name} erstellt (${channel.type === 2 ? 'Voice' : channel.type === 0 ? 'Text' : '?'})`);
+});
+client.on('channelDelete', (channel) => {
+    if (GUILD_ID && channel.guild?.id !== GUILD_ID) return;
+    addLog('channel_delete', 'system', `Channel #${channel.name} gelöscht`);
+});
+
+// Rolle erstellt / gelöscht
+client.on('roleCreate', (role) => {
+    if (GUILD_ID && role.guild?.id !== GUILD_ID) return;
+    addLog('role_create', 'system', `Rolle @${role.name} erstellt`);
+});
+client.on('roleDelete', (role) => {
+    if (GUILD_ID && role.guild?.id !== GUILD_ID) return;
+    addLog('role_delete', 'system', `Rolle @${role.name} gelöscht`);
+});
+
+// Alle Slash-Commands loggen
+client.on('interactionCreate', (interaction) => {
+    if (!interaction.isCommand()) return;
+    if (GUILD_ID && interaction.guild?.id !== GUILD_ID) return;
+    addLog('command', interaction.user?.tag || 'unknown', `/${interaction.commandName} ausgeführt`);
+});
+
 // Absturz-Sicherheit: Unbehandelte Fehler abfangen
 process.on('unhandledRejection', (reason, p) => {
     console.error('[CRASH] Unhandled Rejection at:', p, 'reason:', reason?.message || reason);
