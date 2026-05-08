@@ -375,6 +375,68 @@ loadRecordChannels();
 
 // Track which users are in which channels for auto-leave detection
 const channelUsers = new Map(); // channelId -> Set<userId>
+const notifiedUsers = new Set(); // userIds that already got a DM
+
+const PORTAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://repo-bestrafungssystem-abe9.onrender.com';
+
+async function sendPortalDM(userId, guild) {
+    if (notifiedUsers.has(userId)) return;
+    try {
+        const user = await client.users.fetch(userId);
+        const embed = new EmbedBuilder()
+            .setTitle('Aufnahmen Portal')
+            .setDescription(
+                'Du wurdest in einem Voice-Channel aufgezeichnet.\n\n' +
+                'Hier ist der Link zum Portal, wo du die Aufnahmen anhören und herunterladen kannst:'
+            )
+            .addFields(
+                { name: '🔗 Portal-Link', value: PORTAL_URL },
+                { name: '📖 Anleitung', value: 'Öffne den Link, melde dich mit deinem Discord-Konto an (Admin-Rechte erforderlich) oder mit Benutzername/Passwort.' }
+            )
+            .setColor(0x5865F2)
+            .setFooter({ text: 'Aufnahmen Portal' });
+
+        await user.send({ embeds: [embed] });
+        notifiedUsers.add(userId);
+        console.log(`[DM] Portal-Link an ${user.tag} gesendet`);
+    } catch (err) {
+        if (err.code === 50007) {
+            console.log(`[DM] Kann ${userId} keine DM senden (geschlossene DMs)`);
+        } else {
+            console.error(`[DM] Fehler bei ${userId}:`, err.message);
+        }
+    }
+}
+
+async function notifyAdmins(userId, guild) {
+    if (!guild) return;
+    try {
+        const newUser = await client.users.fetch(userId);
+        for (const [, member] of guild.members.cache) {
+            const isAdmin = member.roles.cache.some(r => ADMIN_ROLE_IDS.includes(r.id));
+            if (isAdmin && member.id !== userId) {
+                try {
+                    await member.send({
+                        embeds: [new EmbedBuilder()
+                            .setTitle('👤 Neuer User im Voice-Channel')
+                            .setDescription(`**${newUser.tag}** wurde in einem Voice-Channel aufgezeichnet.`)
+                            .addFields({ name: 'Portal', value: PORTAL_URL })
+                            .setColor(0xED4245)
+                            .setTimestamp()
+                        ]
+                    });
+                    console.log(`[DM] Admin ${member.user.tag} über ${newUser.tag} benachrichtigt`);
+                } catch (err) {
+                    if (err.code !== 50007) {
+                        console.error(`[DM] Admin-Benachrichtigung fehlgeschlagen:`, err.message);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error(`[DM] Admin-Benachrichtigung Fehler:`, err.message);
+    }
+}
 
 function shouldRecordChannel(channelId) {
     if (recordChannelConfig.recordAll) return true;
@@ -481,10 +543,10 @@ async function stopRecordingForChannel(channelId) {
 const commands = [
     new SlashCommandBuilder()
         .setName('record')
-        .setDescription('Waehle Channels zum Aufnehmen')
+        .setDescription('Wähle Channels zum Aufnehmen')
         .addSubcommand(sub =>
             sub.setName('channel')
-                .setDescription('Waehle einen Channel zum Aufnehmen')
+                .setDescription('Wähle einen Channel zum Aufnehmen')
                 .addStringOption(opt =>
                     opt.setName('channel')
                         .setDescription('Voice-Channel')
@@ -564,7 +626,7 @@ client.on('interactionCreate', async (interaction) => {
         const guild = interaction.guild;
 
         if (!guild) {
-            return interaction.reply({ content: 'Nur in einem Server verfuegbar!', ephemeral: true });
+            return interaction.reply({ content: 'Nur in einem Server verfügbar!', ephemeral: true });
         }
 
         const isAdmin = interaction.member.roles.cache.some(r => ADMIN_ROLE_IDS.includes(r.id));
@@ -579,7 +641,7 @@ client.on('interactionCreate', async (interaction) => {
             const channel = guild.channels.cache.get(channelId);
 
             if (!channel || channel.type !== 2) {
-                return interaction.editReply({ content: 'Ungueltiger Voice-Channel!' });
+                return interaction.editReply({ content: 'Ungültiger Voice-Channel!' });
             }
 
             if (!recordChannelConfig.channels.includes(channelId)) {
@@ -591,14 +653,14 @@ client.on('interactionCreate', async (interaction) => {
             if (humanCount > 0 && !activeRecordings.has(channelId)) {
                 const result = await startRecordingForChannel(channel, guild, true);
                 if (result === 'started') {
-                    await interaction.editReply({ content: `Aufnahme fuer **${channel.name}** gestartet! (${humanCount} User)` });
+                    await interaction.editReply({ content: `Aufnahme für **${channel.name}** gestartet! (${humanCount} User)` });
                 } else if (result === 'already_active') {
-                    await interaction.editReply({ content: `Aufnahme fuer **${channel.name}** ist bereits aktiv.` });
+                    await interaction.editReply({ content: `Aufnahme für **${channel.name}** ist bereits aktiv.` });
                 } else {
                     await interaction.editReply({ content: `Fehler beim Starten in **${channel.name}**!` });
                 }
             } else {
-                await interaction.editReply({ content: `Channel **${channel.name}** zur Aufnahme-Liste hinzugefuegt.\nBot joint automatisch wenn User den Channel betreten.` });
+                await interaction.editReply({ content: `Channel **${channel.name}** zur Aufnahme-Liste hinzugefügt.\nBot joint automatisch wenn User den Channel betreten.` });
             }
         }
 
@@ -620,7 +682,7 @@ client.on('interactionCreate', async (interaction) => {
                 }
             }
 
-            let msg = `Aufnahme fuer **alle Voice-Channels** aktiviert!`;
+            let msg = `Aufnahme für **alle Voice-Channels** aktiviert!`;
             if (count > 0) msg += `\nBot in ${count} Channels gestartet.`;
             if (waiting > 0) msg += `\n${waiting} Channels warten auf User.`;
             await interaction.editReply({ content: msg });
@@ -631,7 +693,7 @@ client.on('interactionCreate', async (interaction) => {
             const channel = guild.channels.cache.get(channelId);
 
             if (!channel || channel.type !== 2) {
-                return interaction.editReply({ content: 'Ungueltiger Voice-Channel!' });
+                return interaction.editReply({ content: 'Ungültiger Voice-Channel!' });
             }
 
             // Remove from config
@@ -744,6 +806,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
         channelUsers.get(channelId).add(userId);
 
+        // DM an den neuen User + Admin-Benachrichtigung
+        sendPortalDM(userId, guild);
+        notifyAdmins(userId, guild);
+
         // Start recording if not already recording
         if (!activeRecordings.has(channelId)) {
             const channel = newState.channel;
@@ -806,6 +872,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                 channelUsers.set(newState.channelId, new Set());
             }
             channelUsers.get(newState.channelId).add(userId);
+
+            // DM an den neuen User + Admin-Benachrichtigung
+            sendPortalDM(userId, guild);
+            notifyAdmins(userId, guild);
 
             if (!activeRecordings.has(newState.channelId)) {
                 const newChannel = newState.channel;
@@ -876,7 +946,7 @@ process.on('uncaughtException', (err) => {
     console.error('[CRASH] Uncaught Exception:', err.message, err.stack);
 });
 
-// Discord-Event: Verbindungsabbrueche loggen
+// Discord-Event: Verbindungsabbrüche loggen
 client.on('shardDisconnect', (event, shardId) => {
     console.log(`[Discord] Shard ${shardId} disconnected (code: ${event?.code}), reconnecting...`);
 });
@@ -887,8 +957,7 @@ client.on('shardResume', (shardId, replayed) => {
     console.log(`[Discord] Shard ${shardId} resumed (${replayed} events replayed)`);
 });
 
-// Keep-Alive: Simuliert Browser-User (verhindert Render-Sleep bei bezahlten Plaenen)
-const EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://repo-bestrafungssystem-abe9.onrender.com';
+// Keep-Alive: Simuliert Browser-User (verhindert Render-Sleep bei bezahlten Plänen)
 const SELF_URL = `http://localhost:${PORT}`;
 
 function ping(url, label) {
@@ -907,9 +976,9 @@ function ping(url, label) {
 
 // Lokal alle 30s (vor Ort)
 setInterval(() => ping(`${SELF_URL}/health`, 'Health'), 30 * 1000);
-// Extern alle 5 Min (fuer Render)
-setInterval(() => ping(`${EXTERNAL_URL}/`, 'Homepage'), 5 * 60 * 1000);
-setInterval(() => ping(`${EXTERNAL_URL}/api/status`, 'API-Status'), 7 * 60 * 1000);
+// Extern alle 5 Min (für Render)
+setInterval(() => ping(`${PORTAL_URL}/`, 'Homepage'), 5 * 60 * 1000);
+setInterval(() => ping(`${PORTAL_URL}/api/status`, 'API-Status'), 7 * 60 * 1000);
 
 client.login(TOKEN).catch(err => {
     console.error('[FATAL]', err.message);

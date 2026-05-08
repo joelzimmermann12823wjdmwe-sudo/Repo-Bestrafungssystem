@@ -136,7 +136,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     // Discord Login - Weiterleitung zu Discord OAuth2
     app.get('/api/auth/discord', (req, res) => {
         if (!isDiscordAuthAvailable(req)) {
-            return res.status(400).json({ error: 'Discord Auth nur auf dem Produktionsserver verfuegbar' });
+            return res.status(400).json({ error: 'Discord Auth nur auf dem Produktionsserver verfügbar' });
         }
         const redirectUri = getDiscordRedirectUri(req);
         const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds`;
@@ -147,7 +147,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     app.get('/api/auth/discord/callback', async (req, res) => {
         const { code } = req.query;
         if (!code) {
-            return res.status(400).send('Fehlender Authorization Code - <a href="/login">zurueck</a>');
+            return res.status(400).send('Fehlender Authorization Code - <a href="/login">zurück</a>');
         }
 
         try {
@@ -168,7 +168,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
             if (!tokenRes.ok) {
                 const errText = await tokenRes.text();
                 console.error('[Discord OAuth] Token-Fehler:', tokenRes.status, errText);
-                return res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurueck</a>');
+                return res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurück</a>');
             }
             const tokenData = await tokenRes.json();
 
@@ -184,19 +184,19 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
             });
             const guildsData = await guildsRes.json();
 
-            // Pruefen ob User auf unserem Guild ist
+            // Prüfen ob User auf unserem Guild ist
             const ourGuild = guildsData.find(g => g.id === GUILD_ID);
             if (!ourGuild) {
                 console.warn(`[Discord OAuth] User ${userData.username} (${userData.id}) ist nicht auf Guild ${GUILD_ID}`);
-                return res.status(403).send('Du bist nicht auf diesem Discord Server - <a href="/login">zurueck</a>');
+                return res.status(403).send('Du bist nicht auf diesem Discord Server - <a href="/login">zurück</a>');
             }
 
-            // Pruefen auf Administrator-Rechte (0x8)
+            // Prüfen auf Administrator-Rechte (0x8)
             const permissions = BigInt(ourGuild.permissions);
             const isAdmin = (permissions & BigInt(0x8)) === BigInt(0x8);
             if (!isAdmin) {
                 console.warn(`[Discord OAuth] User ${userData.username} (${userData.id}) hat keine Admin-Rechte`);
-                return res.status(403).send('Du brauchst Administrator-Rechte auf dem Discord Server - <a href="/login">zurueck</a>');
+                return res.status(403).send('Du brauchst Administrator-Rechte auf dem Discord Server - <a href="/login">zurück</a>');
             }
 
             // Session erstellen
@@ -224,7 +224,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
             res.redirect('/');
         } catch (err) {
             console.error('[Discord OAuth] Fehler:', err.message);
-            res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurueck</a>');
+            res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurück</a>');
         }
     });
 
@@ -386,11 +386,11 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
         try {
             fs.rmSync(folderPath, { recursive: true, force: true });
-            console.log(`[Web] Ordner geloescht: ${folder}`);
+            console.log(`[Web] Ordner gelöscht: ${folder}`);
             res.json({ success: true, folder });
         } catch (err) {
-            console.error(`[Fehler] Loeschen ${folder}:`, err.message);
-            res.status(500).json({ error: 'Fehler beim Loeschen' });
+            console.error(`[Fehler] Löschen ${folder}:`, err.message);
+            res.status(500).json({ error: 'Fehler beim Löschen' });
         }
     });
 
@@ -411,11 +411,11 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
         try {
             fs.unlinkSync(filePath);
-            console.log(`[Web] Datei geloescht: ${folder}/${file}`);
+            console.log(`[Web] Datei gelöscht: ${folder}/${file}`);
             res.json({ success: true, folder, file });
         } catch (err) {
-            console.error(`[Fehler] Loeschen ${folder}/${file}:`, err.message);
-            res.status(500).json({ error: 'Fehler beim Loeschen' });
+            console.error(`[Fehler] Löschen ${folder}/${file}:`, err.message);
+            res.status(500).json({ error: 'Fehler beim Löschen' });
         }
     });
 
