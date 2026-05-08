@@ -12,6 +12,9 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     const webHost = '0.0.0.0';
     const webUsername = process.env.WEB_USERNAME || 'admin';
     const webPassword = process.env.WEB_PASSWORD || 'admin123';
+    const GUILD_ID = process.env.GUILD_ID;
+    const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+    const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
     if (webUsername === 'admin' && webPassword === 'admin123') {
         console.warn('[WARN] Default credentials! Set WEB_USERNAME and WEB_PASSWORD in .env');
@@ -98,7 +101,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
     function requireAuth(req, res, next) {
         if (getSession(req)) return next();
-        const publicPaths = ['/login', '/api/login', '/css', '/js'];
+        const publicPaths = ['/login', '/api/login', '/api/auth', '/css', '/js'];
         if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/')) || req.path === '/favicon.ico') {
             return next();
         }
@@ -111,6 +114,118 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     // Health endpoint - BEFORE auth middleware for Render
     app.get('/health', (req, res) => {
         res.status(200).json({ status: 'healthy' });
+    });
+
+    // Helper: nur auf Production (Render) aktiv
+    function isDiscordAuthAvailable(req) {
+        if (!DISCORD_CLIENT_ID || !DISCORD_CLIENT_SECRET) return false;
+        const host = req.get('host') || '';
+        return !host.includes('localhost') && !host.includes('127.0.0.1') && !host.includes('::1');
+    }
+
+    function getDiscordRedirectUri(req) {
+        const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+        return `${proto}://${req.get('host')}/api/auth/discord/callback`;
+    }
+
+    // Discord Auth Status
+    app.get('/api/auth/status', (req, res) => {
+        res.json({ available: isDiscordAuthAvailable(req) });
+    });
+
+    // Discord Login - Weiterleitung zu Discord OAuth2
+    app.get('/api/auth/discord', (req, res) => {
+        if (!isDiscordAuthAvailable(req)) {
+            return res.status(400).json({ error: 'Discord Auth nur auf dem Produktionsserver verfuegbar' });
+        }
+        const redirectUri = getDiscordRedirectUri(req);
+        const url = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds`;
+        res.redirect(url);
+    });
+
+    // Discord OAuth2 Callback
+    app.get('/api/auth/discord/callback', async (req, res) => {
+        const { code } = req.query;
+        if (!code) {
+            return res.status(400).send('Fehlender Authorization Code - <a href="/login">zurueck</a>');
+        }
+
+        try {
+            const redirectUri = getDiscordRedirectUri(req);
+
+            // Token eintauschen
+            const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                    client_id: DISCORD_CLIENT_ID,
+                    client_secret: DISCORD_CLIENT_SECRET,
+                    grant_type: 'authorization_code',
+                    code,
+                    redirect_uri: redirectUri
+                })
+            });
+            if (!tokenRes.ok) {
+                const errText = await tokenRes.text();
+                console.error('[Discord OAuth] Token-Fehler:', tokenRes.status, errText);
+                return res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurueck</a>');
+            }
+            const tokenData = await tokenRes.json();
+
+            // User-Daten abrufen
+            const userRes = await fetch('https://discord.com/api/users/@me', {
+                headers: { Authorization: `Bearer ${tokenData.access_token}` }
+            });
+            const userData = await userRes.json();
+
+            // Guilds des Users abrufen
+            const guildsRes = await fetch('https://discord.com/api/users/@me/guilds', {
+                headers: { Authorization: `Bearer ${tokenData.access_token}` }
+            });
+            const guildsData = await guildsRes.json();
+
+            // Pruefen ob User auf unserem Guild ist
+            const ourGuild = guildsData.find(g => g.id === GUILD_ID);
+            if (!ourGuild) {
+                console.warn(`[Discord OAuth] User ${userData.username} (${userData.id}) ist nicht auf Guild ${GUILD_ID}`);
+                return res.status(403).send('Du bist nicht auf diesem Discord Server - <a href="/login">zurueck</a>');
+            }
+
+            // Pruefen auf Administrator-Rechte (0x8)
+            const permissions = BigInt(ourGuild.permissions);
+            const isAdmin = (permissions & BigInt(0x8)) === BigInt(0x8);
+            if (!isAdmin) {
+                console.warn(`[Discord OAuth] User ${userData.username} (${userData.id}) hat keine Admin-Rechte`);
+                return res.status(403).send('Du brauchst Administrator-Rechte auf dem Discord Server - <a href="/login">zurueck</a>');
+            }
+
+            // Session erstellen
+            const token = crypto.randomBytes(32).toString('hex');
+            sessions[token] = {
+                username: userData.global_name || userData.username,
+                created: Date.now(),
+                method: 'discord',
+                discordId: userData.id,
+                avatar: userData.avatar
+                    ? `https://cdn.discordapp.com/avatars/${userData.id}/${userData.avatar}.png`
+                    : null
+            };
+            saveSessions();
+            console.log(`[Discord OAuth] ${userData.username} (${userData.id}) angemeldet (Admin)`);
+
+            const isHttps = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
+            res.cookie('session', token, {
+                httpOnly: true,
+                secure: isHttps,
+                sameSite: 'lax',
+                maxAge: SESSION_MAX_AGE,
+                path: '/'
+            });
+            res.redirect('/');
+        } catch (err) {
+            console.error('[Discord OAuth] Fehler:', err.message);
+            res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurueck</a>');
+        }
     });
 
     app.use(requireAuth);

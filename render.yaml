@@ -30,6 +30,10 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
         sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
     disk:
       name: punishment-data
       mountPath: /opt/render/project/src/data
