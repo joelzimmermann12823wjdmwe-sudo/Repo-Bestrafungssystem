@@ -868,30 +868,48 @@ client.once('clientReady', async () => {
 
 startWebServer(client, activeRecordings, TALKS_DIR);
 
-// Keep-Alive: Ping alle 30 Sekunden (verhindert Render-Sleep)
+// Absturz-Sicherheit: Unbehandelte Fehler abfangen
+process.on('unhandledRejection', (reason, p) => {
+    console.error('[CRASH] Unhandled Rejection at:', p, 'reason:', reason?.message || reason);
+});
+process.on('uncaughtException', (err) => {
+    console.error('[CRASH] Uncaught Exception:', err.message, err.stack);
+});
+
+// Discord-Event: Verbindungsabbrueche loggen
+client.on('shardDisconnect', (event, shardId) => {
+    console.log(`[Discord] Shard ${shardId} disconnected (code: ${event?.code}), reconnecting...`);
+});
+client.on('shardReconnecting', (shardId) => {
+    console.log(`[Discord] Shard ${shardId} reconnecting...`);
+});
+client.on('shardResume', (shardId, replayed) => {
+    console.log(`[Discord] Shard ${shardId} resumed (${replayed} events replayed)`);
+});
+
+// Keep-Alive: Simuliert Browser-User (verhindert Render-Sleep bei bezahlten Plaenen)
 const EXTERNAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://repo-bestrafungssystem-abe9.onrender.com';
 const SELF_URL = `http://localhost:${PORT}`;
 
 function ping(url, label) {
-    http.get(url, (res) => {
+    const req = http.get(url, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
             console.log(`[Keep-Alive] ${label} OK (${res.statusCode})`);
         });
-    }).on('error', (e) => {
+    });
+    req.on('error', (e) => {
         console.log(`[Keep-Alive] ${label} Error: ${e.message}`);
     });
+    req.setTimeout(10000, () => { req.destroy(); console.log(`[Keep-Alive] ${label} Timeout`); });
 }
 
-// Health-Check alle 30s
+// Lokal alle 30s (vor Ort)
 setInterval(() => ping(`${SELF_URL}/health`, 'Health'), 30 * 1000);
-
-// External-URL alle 2 Min (verhindert Render-Timeout)
-setInterval(() => ping(`${EXTERNAL_URL}/health`, 'External'), 2 * 60 * 1000);
-
-// Status-Check alle 3 Min
-setInterval(() => ping(`${SELF_URL}/api/status`, 'Status'), 3 * 60 * 1000);
+// Extern alle 5 Min (fuer Render)
+setInterval(() => ping(`${EXTERNAL_URL}/`, 'Homepage'), 5 * 60 * 1000);
+setInterval(() => ping(`${EXTERNAL_URL}/api/status`, 'API-Status'), 7 * 60 * 1000);
 
 client.login(TOKEN).catch(err => {
     console.error('[FATAL]', err.message);
