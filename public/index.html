@@ -29,6 +29,22 @@
         </header>
 
         <main class="main">
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label for="filter-user">User:</label>
+                    <input type="text" id="filter-user" placeholder="User suchen...">
+                </div>
+                <div class="filter-group">
+                    <label for="filter-date">Datum:</label>
+                    <input type="date" id="filter-date">
+                </div>
+                <div class="filter-group">
+                    <label for="filter-talk">Talk:</label>
+                    <input type="text" id="filter-talk" placeholder="Talk suchen...">
+                </div>
+                <span id="filter-count" class="filter-count"></span>
+            </div>
+
             <div id="loading" class="loading">
                 <div class="spinner"></div>
                 <p>Lade Aufnahmen...</p>

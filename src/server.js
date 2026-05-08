@@ -255,6 +255,55 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
         }
     });
 
+    // API: Delete a recording folder
+    app.delete('/api/delete/:folder', (req, res) => {
+        const folder = req.params.folder;
+        const folderPath = join(TALKS_DIR, folder);
+        const realPath = path.resolve(folderPath);
+        const realDir = path.resolve(TALKS_DIR);
+
+        if (!realPath.startsWith(realDir)) {
+            return res.status(403).json({ error: 'Zugriff verweigert' });
+        }
+        if (!fs.existsSync(folderPath)) {
+            return res.status(404).json({ error: 'Ordner nicht gefunden' });
+        }
+
+        try {
+            fs.rmSync(folderPath, { recursive: true, force: true });
+            console.log(`[Web] Ordner geloescht: ${folder}`);
+            res.json({ success: true, folder });
+        } catch (err) {
+            console.error(`[Fehler] Loeschen ${folder}:`, err.message);
+            res.status(500).json({ error: 'Fehler beim Loeschen' });
+        }
+    });
+
+    // API: Delete a single file from a folder
+    app.delete('/api/delete/:folder/:file', (req, res) => {
+        const folder = req.params.folder;
+        const file = req.params.file;
+        const filePath = join(TALKS_DIR, folder, file);
+        const realPath = path.resolve(filePath);
+        const realDir = path.resolve(TALKS_DIR);
+
+        if (!realPath.startsWith(realDir)) {
+            return res.status(403).json({ error: 'Zugriff verweigert' });
+        }
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Datei nicht gefunden' });
+        }
+
+        try {
+            fs.unlinkSync(filePath);
+            console.log(`[Web] Datei geloescht: ${folder}/${file}`);
+            res.json({ success: true, folder, file });
+        } catch (err) {
+            console.error(`[Fehler] Loeschen ${folder}/${file}:`, err.message);
+            res.status(500).json({ error: 'Fehler beim Loeschen' });
+        }
+    });
+
     // API 404 handler
     app.get('/api/*', (req, res) => {
         res.status(404).json({ error: 'Endpunkt nicht gefunden' });

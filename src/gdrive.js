@@ -49,6 +49,12 @@ async function ensureFolderExists(drive, folderName) {
     return folder.data.id;
 }
 
+function getFileMimeType(fileName) {
+    if (fileName.endsWith('.wav')) return 'audio/wav';
+    if (fileName.endsWith('.json')) return 'application/json';
+    return 'application/octet-stream';
+}
+
 async function uploadSingleFile(filePath, fileName, parentFolderId) {
     const drive = getDrive();
     if (!drive) return null;
@@ -57,7 +63,7 @@ async function uploadSingleFile(filePath, fileName, parentFolderId) {
     console.log(`[Drive] Upload: ${fileName} (${(stats.size / 1024).toFixed(1)} KB)`);
 
     const media = {
-        mimeType: stats.size > 5 * 1024 * 1024 ? 'application/octet-stream' : 'application/json',
+        mimeType: getFileMimeType(fileName),
         body: fs.createReadStream(filePath),
     };
 

@@ -1,7 +1,6 @@
 const RECORDINGS_ENDPOINT = '/api/recordings';
 const STATUS_ENDPOINT = '/api/status';
 
-// Escape HTML to prevent XSS
 function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str;
@@ -56,10 +55,6 @@ async function loadRecordings() {
             }
             throw new Error('Serverfehler (' + res.status + ')');
         }
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            throw new Error('Unerwartete Serverantwort');
-        }
         const data = await res.json();
         hideLoading();
 
@@ -86,8 +81,6 @@ async function updateStatus() {
             }
             return;
         }
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) return;
         const data = await res.json();
 
         const statusBadge = document.getElementById('bot-status');
@@ -106,19 +99,80 @@ async function updateStatus() {
     }
 }
 
+function applyFilters(folders) {
+    const userFilter = document.getElementById('filter-user').value.toLowerCase();
+    const dateFilter = document.getElementById('filter-date').value;
+    const talkFilter = document.getElementById('filter-talk').value.toLowerCase();
+
+    return folders.filter(function(folder) {
+        // Filter by talk name
+        if (talkFilter && !folder.name.toLowerCase().includes(talkFilter)) return false;
+
+        // Filter by date (exact day from created timestamp)
+        if (dateFilter) {
+            const folderDate = new Date(folder.created);
+            const filterDate = new Date(dateFilter);
+            if (folderDate.toDateString() !== filterDate.toDateString()) return false;
+        }
+
+        // Filter by user (search in file names)
+        if (userFilter) {
+            const hasUser = folder.files.some(function(file) {
+                return file.name.toLowerCase().includes(userFilter);
+            });
+            if (!hasUser) return false;
+        }
+
+        return true;
+    });
+}
+
+async function deleteFolder(folderName) {
+    if (!confirm('Wirklich "' + folderName + '" löschen?')) return;
+    try {
+        const res = await fetch('/api/delete/' + encodeURIComponent(folderName), { method: 'DELETE' });
+        if (res.ok) {
+            loadRecordings();
+        } else {
+            const data = await res.json();
+            alert('Fehler: ' + (data.error || 'Unbekannt'));
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
+async function deleteFile(folderName, fileName) {
+    if (!confirm('"' + fileName + '" löschen?')) return;
+    try {
+        var encodedFolder = encodeURIComponent(folderName);
+        var encodedFile = encodeURIComponent(fileName);
+        const res = await fetch('/api/delete/' + encodedFolder + '/' + encodedFile, { method: 'DELETE' });
+        if (res.ok) {
+            openModal(folderName);
+        } else {
+            const data = await res.json();
+            alert('Fehler: ' + (data.error || 'Unbekannt'));
+        }
+    } catch (err) {
+        alert('Fehler: ' + err.message);
+    }
+}
+
 function renderRecordings(folders) {
+    const filtered = applyFilters(folders);
     const list = document.getElementById('recordings-list');
-    list.innerHTML = folders.map(function(folder) {
+    list.innerHTML = filtered.map(function(folder) {
         var safeName = escapeHtml(folder.name);
         var safeDate = escapeHtml(formatDate(folder.created));
         var fileCount = folder.fileCount;
         var safeSize = escapeHtml(formatBytes(folder.totalSize));
 
-        var actions = '';
+        var actions = '<button class="btn btn-danger btn-delete" data-folder="' + safeName + '">Löschen</button>';
         if (folder.files.length === 1) {
-            actions = '<a href="' + escapeHtml(folder.files[0].url) + '" class="btn btn-primary" download>Herunterladen</a>';
+            actions += '<a href="' + escapeHtml(folder.files[0].url) + '" class="btn btn-primary" download>Download</a>';
         } else {
-            actions = '<button class="btn btn-primary btn-view" data-folder="' + safeName + '">Dateien ansehen</button>';
+            actions += '<button class="btn btn-primary btn-view" data-folder="' + safeName + '">Dateien</button>';
         }
 
         var fileListHtml = '';
@@ -142,20 +196,38 @@ function renderRecordings(folders) {
         '</div>';
     }).join('');
 
+    // Show filtered count
+    var countEl = document.getElementById('filter-count');
+    if (countEl) {
+        if (filtered.length < folders.length) {
+            countEl.textContent = filtered.length + ' von ' + folders.length + ' angezeigt';
+        } else {
+            countEl.textContent = folders.length + ' Aufnahmen';
+        }
+    }
+
     document.querySelectorAll('.btn-view').forEach(function(btn) {
         btn.addEventListener('click', function() {
             openModal(this.getAttribute('data-folder'));
         });
     });
+
+    document.querySelectorAll('.btn-delete').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            deleteFolder(this.getAttribute('data-folder'));
+        });
+    });
 }
 
 function renderFileList(folder) {
+    var safeFolderName = escapeHtml(folder.name);
     return '<div class="file-list">' +
         folder.files.map(function(file) {
             var safeFileName = escapeHtml(sanitizeName(file.name));
             var safeSize = escapeHtml(formatBytes(file.size));
             var safeUrl = escapeHtml(file.url);
             var safeTitle = escapeHtml(file.name);
+            var encodedFileName = encodeURIComponent(file.name);
             return '<div class="file-item">' +
                 '<div class="file-info">' +
                     '<svg class="file-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">' +
@@ -164,7 +236,10 @@ function renderFileList(folder) {
                     '<span class="file-name" title="' + safeTitle + '">' + safeFileName + '</span>' +
                     '<span class="file-size">' + safeSize + '</span>' +
                 '</div>' +
-                '<a href="' + safeUrl + '" class="download-btn" download>Download</a>' +
+                '<div class="file-actions">' +
+                    '<a href="' + safeUrl + '" class="download-btn" download>Download</a>' +
+                    '<button class="btn-delete-file" data-folder="' + safeFolderName + '" data-file="' + encodedFileName + '">X</button>' +
+                '</div>' +
             '</div>';
         }).join('') +
     '</div>';
@@ -191,6 +266,11 @@ function openModal(folderName) {
                 return;
             }
             body.innerHTML = renderFileList(folder);
+            body.querySelectorAll('.btn-delete-file').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    deleteFile(folderName, decodeURIComponent(this.getAttribute('data-file')));
+                });
+            });
         })
         .catch(function() {
             body.innerHTML = '<p class="error">Fehler beim Laden</p>';
@@ -222,18 +302,24 @@ async function loadUserInfo() {
     try {
         const res = await fetch('/api/status');
         if (res.ok) {
-            const contentType = res.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                const data = await res.json();
-                if (data.bot && data.bot !== 'offline') {
-                    document.getElementById('user-display').textContent = data.bot;
-                }
+            const data = await res.json();
+            if (data.bot && data.bot !== 'offline') {
+                document.getElementById('user-display').textContent = data.bot;
             }
         }
     } catch (err) {
         // silent fail
     }
 }
+
+// Live filter
+document.getElementById('filter-user').addEventListener('input', loadRecordings);
+document.getElementById('filter-date').addEventListener('change', loadRecordings);
+document.getElementById('filter-talk').addEventListener('input', function() {
+    var val = this.value;
+    clearTimeout(this._timer);
+    this._timer = setTimeout(loadRecordings, 300);
+});
 
 loadRecordings();
 updateStatus();

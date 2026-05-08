@@ -1,8 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
-const { spawnSync } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
 const Opus = require('opusscript');
 
 const DATA_DIR = path.join(__dirname, 'test-data');
@@ -151,15 +149,20 @@ class VoiceRecorder {
     const FRAME_SIZE = SAMPLE_RATE / 50;
 
     await asyncTest('Normalization amplifies very quiet audio to audible level', async () => {
-        spawnSync(ffmpegPath, [
-            '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
-            '-filter:a', 'volume=0.01',
-            '-f', 's16le', '-acodec', 'pcm_s16le',
-            '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS),
-            path.join(DATA_DIR, 'quiet_pcm.raw')
-        ], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const SAMPLE_RATE = 48000;
+        const CHANNELS = 2;
+        const FRAME_SIZE = SAMPLE_RATE / 50;
 
-        const quietPcm = fs.readFileSync(path.join(DATA_DIR, 'quiet_pcm.raw'));
+        // Create synthetic quiet PCM data (sine wave at 440Hz, volume 0.01)
+        const durationSec = 1;
+        const totalSamples = SAMPLE_RATE * durationSec;
+        const quietPcm = Buffer.alloc(totalSamples * CHANNELS * 2);
+        for (let i = 0; i < totalSamples; i++) {
+            const sample = Math.round(327 * Math.sin(2 * Math.PI * 440 * i / SAMPLE_RATE)); // ~1% volume (matched to old ffmpeg volume=0.01)
+            quietPcm.writeInt16LE(sample, i * CHANNELS * 2);
+            quietPcm.writeInt16LE(sample, i * CHANNELS * 2 + 2);
+        }
+
         let quietMax = 0;
         for (let i = 0; i < quietPcm.length; i += 2) {
             const v = Math.abs(quietPcm.readInt16LE(i));
@@ -234,15 +237,20 @@ class VoiceRecorder {
     console.log('\n=== Full Pipeline: Quiet Opus -> Decode -> Normalize -> WAV ===\n');
 
     await asyncTest('Full pipeline: quiet audio normalized to audible level', async () => {
+        const SAMPLE_RATE = 48000;
+        const CHANNELS = 2;
+        const FRAME_SIZE = SAMPLE_RATE / 50;
+
         const encoder = new Opus(SAMPLE_RATE, CHANNELS, Opus.Application.AUDIO);
-        spawnSync(ffmpegPath, [
-            '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
-            '-filter:a', 'volume=0.01',
-            '-f', 's16le', '-acodec', 'pcm_s16le',
-            '-ar', String(SAMPLE_RATE), '-ac', String(CHANNELS),
-            path.join(DATA_DIR, 'quiet_pcm.raw')
-        ], { stdio: ['ignore', 'pipe', 'pipe'] });
-        const quietPcm = fs.readFileSync(path.join(DATA_DIR, 'quiet_pcm.raw'));
+        const durationSec = 1;
+        const totalSamples = SAMPLE_RATE * durationSec;
+        const quietPcm = Buffer.alloc(totalSamples * CHANNELS * 2);
+        for (let i = 0; i < totalSamples; i++) {
+            const sample = Math.round(327 * Math.sin(2 * Math.PI * 440 * i / SAMPLE_RATE)); // ~1% volume
+            quietPcm.writeInt16LE(sample, i * CHANNELS * 2);
+            quietPcm.writeInt16LE(sample, i * CHANNELS * 2 + 2);
+        }
+
         const frameBytes = FRAME_SIZE * CHANNELS * 2;
         const opusPackets = [];
         for (let offset = 0; offset < quietPcm.length; offset += frameBytes) {
