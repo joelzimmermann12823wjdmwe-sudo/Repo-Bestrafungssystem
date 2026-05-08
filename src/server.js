@@ -492,6 +492,8 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     app.listen(webPort, webHost, () => {
         console.log(`[Web] Portal: http://${webHost}:${webPort}`);
     });
+
+    return { addLog };
 }
 
 module.exports = startWebServer;

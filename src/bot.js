@@ -796,9 +796,19 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     const userId = newState.id || oldState.id;
     if (userId === client.user.id) return;
 
+    // User ermitteln für Logs
+    let userTag = userId;
+    try {
+        const user = await client.users.fetch(userId);
+        userTag = user.tag;
+    } catch {}
+
     // User joined a channel
     if (newState.channelId && !oldState.channelId) {
         const channelId = newState.channelId;
+        const channelName = newState.channel?.name || channelId;
+        addLog('voice_join', userTag, `Beigetreten: #${channelName}`, { channelId });
+
         if (!shouldRecordChannel(channelId)) return;
 
         if (!channelUsers.has(channelId)) {
@@ -822,6 +832,9 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     // User left a channel
     if (oldState.channelId && !newState.channelId) {
         const channelId = oldState.channelId;
+        const channelName = oldState.channel?.name || channelId;
+        addLog('voice_leave', userTag, `Verlassen: #${channelName}`, { channelId });
+
         const users = channelUsers.get(channelId);
         if (users) {
             users.delete(userId);
@@ -846,6 +859,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
     // User switched channels
     if (oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId) {
+        const oldName = oldState.channel?.name || oldState.channelId;
+        const newName = newState.channel?.name || newState.channelId;
+        addLog('voice_move', userTag, `Gewechselt: #${oldName} → #${newName}`, { oldChannel: oldState.channelId, newChannel: newState.channelId });
+
         // Handle leaving old channel
         const oldChannelUsers = channelUsers.get(oldState.channelId);
         if (oldChannelUsers) {
@@ -936,7 +953,7 @@ client.once('clientReady', async () => {
     }
 });
 
-startWebServer(client, activeRecordings, TALKS_DIR);
+const { addLog } = startWebServer(client, activeRecordings, TALKS_DIR);
 
 // Absturz-Sicherheit: Unbehandelte Fehler abfangen
 process.on('unhandledRejection', (reason, p) => {

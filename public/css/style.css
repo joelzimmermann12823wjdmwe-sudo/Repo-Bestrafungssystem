@@ -554,6 +554,9 @@ body {
 .log-type.delete_folder { background: rgba(237,66,69,0.15); color: var(--danger); }
 .log-type.delete_file { background: rgba(237,66,69,0.15); color: var(--danger); }
 .log-type.error { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.voice_join { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.voice_leave { background: rgba(254,231,92,0.15); color: var(--warning); }
+.log-type.voice_move { background: rgba(88,101,242,0.15); color: #8b9aff; }
 
 .log-user {
     color: var(--accent);

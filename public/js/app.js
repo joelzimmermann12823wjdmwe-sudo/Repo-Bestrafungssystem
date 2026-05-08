@@ -394,9 +394,23 @@ function renderLogs(logs) {
     }
 
     list.innerHTML = logs.map(function(entry) {
-        var typeClass = 'log-type ' + (entry.type || '');
+        var type = entry.type || '';
+        var typeLabels = {
+            'login': 'Login',
+            'login_failed': 'Fehler',
+            'logout': 'Logout',
+            'discord_login': 'Discord',
+            'download': 'Download',
+            'delete_folder': 'Löschen',
+            'delete_file': 'Löschen',
+            'error': 'Fehler',
+            'voice_join': 'Beitritt',
+            'voice_leave': 'Verlassen',
+            'voice_move': 'Wechsel'
+        };
+        var typeClass = 'log-type ' + type;
         var safeTime = escapeHtml(formatDateTime(entry.timestamp));
-        var safeType = escapeHtml(entry.type || '');
+        var safeType = escapeHtml(typeLabels[type] || type);
         var safeUser = escapeHtml(entry.username || '');
         var safeMsg = escapeHtml(entry.message || '');
 
