@@ -471,3 +471,117 @@ body {
     border-color: var(--danger);
     background: rgba(237, 66, 69, 0.1);
 }
+
+/* Tab bar */
+.tab-bar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    padding: 4px;
+    border: 1px solid var(--border);
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 10px 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.05);
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* Logs */
+.logs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 40px;
+}
+
+.log-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    transition: background 0.2s ease;
+}
+
+.log-entry:hover {
+    background: var(--bg-card-hover);
+}
+
+.log-time {
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.log-type {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.log-type.login { background: rgba(87,242,135,0.15); color: var(--success); }
+.log-type.login_failed { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.logout { background: rgba(136,136,136,0.15); color: var(--text-secondary); }
+.log-type.discord_login { background: rgba(88,101,242,0.15); color: #8b9aff; }
+.log-type.download { background: rgba(88,101,242,0.15); color: var(--accent); }
+.log-type.delete_folder { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.delete_file { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.error { background: rgba(237,66,69,0.15); color: var(--danger); }
+
+.log-user {
+    color: var(--accent);
+    font-weight: 500;
+    flex-shrink: 0;
+}
+
+.log-msg {
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.filter-group select {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s;
+    cursor: pointer;
+}
+
+.filter-group select:focus {
+    border-color: var(--accent);
+}

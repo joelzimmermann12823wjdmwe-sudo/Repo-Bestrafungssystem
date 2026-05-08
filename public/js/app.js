@@ -26,6 +26,18 @@ function formatDate(dateStr) {
     });
 }
 
+function formatDateTime(dateStr) {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('de-DE', {
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+}
+
 function sanitizeName(name) {
     return name.replace(/^USER_/, '').replace(/_/g, ' ').replace('.wav', '');
 }
@@ -326,3 +338,96 @@ updateStatus();
 loadUserInfo();
 setInterval(updateStatus, 30000);
 setInterval(loadRecordings, 60000);
+
+// === Logs ===
+
+let logTypes = [];
+let logUsers = [];
+
+async function loadLogs() {
+    const type = document.getElementById('log-filter-type').value;
+    const user = document.getElementById('log-filter-user').value;
+    const from = document.getElementById('log-filter-from').value;
+    const to = document.getElementById('log-filter-to').value;
+
+    var params = new URLSearchParams();
+    if (type) params.set('type', type);
+    if (user) params.set('user', user);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+
+    document.getElementById('log-loading').classList.remove('hidden');
+
+    try {
+        const res = await fetch('/api/logs?' + params.toString());
+        if (!res.ok) {
+            if (res.status === 401) { window.location.href = '/login'; return; }
+            throw new Error('Serverfehler');
+        }
+        const data = await res.json();
+        document.getElementById('log-loading').classList.add('hidden');
+
+        logTypes = data.types || [];
+        logUsers = data.users || [];
+
+        // Fill type filter
+        var typeSelect = document.getElementById('log-filter-type');
+        var currentType = typeSelect.value;
+        typeSelect.innerHTML = '<option value="">Alle</option>' +
+            logTypes.map(function(t) {
+                return '<option value="' + escapeHtml(t) + '"' + (t === currentType ? ' selected' : '') + '>' + escapeHtml(t) + '</option>';
+            }).join('');
+
+        renderLogs(data.logs);
+    } catch (err) {
+        document.getElementById('log-loading').classList.add('hidden');
+        document.getElementById('logs-list').innerHTML = '<p class="error">Fehler: ' + escapeHtml(err.message) + '</p>';
+    }
+}
+
+function renderLogs(logs) {
+    var list = document.getElementById('logs-list');
+    if (logs.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>Keine Logs gefunden</p></div>';
+        document.getElementById('log-count').textContent = '0 Einträge';
+        return;
+    }
+
+    list.innerHTML = logs.map(function(entry) {
+        var typeClass = 'log-type ' + (entry.type || '');
+        var safeTime = escapeHtml(formatDateTime(entry.timestamp));
+        var safeType = escapeHtml(entry.type || '');
+        var safeUser = escapeHtml(entry.username || '');
+        var safeMsg = escapeHtml(entry.message || '');
+
+        return '<div class="log-entry">' +
+            '<span class="log-time">' + safeTime + '</span>' +
+            '<span class="' + typeClass + '">' + safeType + '</span>' +
+            '<span class="log-user">' + safeUser + '</span>' +
+            '<span class="log-msg" title="' + safeMsg + '">' + safeMsg + '</span>' +
+        '</div>';
+    }).join('');
+
+    document.getElementById('log-count').textContent = logs.length + ' Einträge';
+}
+
+// Tab switching
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        this.classList.add('active');
+        var tab = this.getAttribute('data-tab');
+        document.querySelectorAll('[id^="tab-"]').forEach(function(el) { el.classList.add('hidden'); });
+        document.getElementById('tab-' + tab).classList.remove('hidden');
+        if (tab === 'logs') loadLogs();
+    });
+});
+
+// Log filter events
+document.getElementById('log-filter-type').addEventListener('change', loadLogs);
+document.getElementById('log-filter-user').addEventListener('input', function() {
+    clearTimeout(this._timer);
+    this._timer = setTimeout(loadLogs, 300);
+});
+document.getElementById('log-filter-from').addEventListener('change', loadLogs);
+document.getElementById('log-filter-to').addEventListener('change', loadLogs);

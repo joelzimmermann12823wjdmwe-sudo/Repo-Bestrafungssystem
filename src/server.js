@@ -80,6 +80,46 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
     setInterval(cleanupExpiredSessions, SESSION_CLEANUP_INTERVAL);
 
+    // Audit-Log (append-only, unloeschbar)
+    const LOG_FILE = join(DATA_DIR, 'audit.log');
+
+    function addLog(type, username, message, details) {
+        try {
+            const entry = {
+                id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                timestamp: new Date().toISOString(),
+                type,
+                username: username || 'system',
+                message,
+                details: details || null
+            };
+            fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n', 'utf-8');
+        } catch (err) {
+            console.error('[Log] Fehler:', err.message);
+        }
+    }
+
+    function loadLogs() {
+        try {
+            if (!fs.existsSync(LOG_FILE)) return [];
+            const data = fs.readFileSync(LOG_FILE, 'utf-8');
+            return data.split('\n').filter(Boolean).map(line => {
+                try { return JSON.parse(line); } catch { return null; }
+            }).filter(Boolean);
+        } catch {
+            return [];
+        }
+    }
+
+    function getLogsFiltered(query) {
+        let logs = loadLogs();
+        if (query.type) logs = logs.filter(l => l.type === query.type);
+        if (query.user) logs = logs.filter(l => l.username.toLowerCase().includes(query.user.toLowerCase()));
+        if (query.from) logs = logs.filter(l => new Date(l.timestamp) >= new Date(query.from));
+        if (query.to) logs = logs.filter(l => new Date(l.timestamp) <= new Date(query.to + 'T23:59:59'));
+        return logs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    }
+
     function createSession(username) {
         const token = crypto.randomBytes(32).toString('hex');
         sessions[token] = { username, created: Date.now() };
@@ -211,6 +251,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
                     : null
             };
             saveSessions();
+            addLog('discord_login', userData.global_name || userData.username, 'Login via Discord');
             console.log(`[Discord OAuth] ${userData.username} (${userData.id}) angemeldet (Admin)`);
 
             const isHttps = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
@@ -223,6 +264,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
             });
             res.redirect('/');
         } catch (err) {
+            addLog('error', 'system', `Discord OAuth Fehler: ${err.message}`);
             console.error('[Discord OAuth] Fehler:', err.message);
             res.status(500).send('Authentifizierung fehlgeschlagen - <a href="/login">zurück</a>');
         }
@@ -279,15 +321,19 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
                 maxAge: SESSION_MAX_AGE,
                 path: '/'
             });
+            addLog('login', username, 'Login via Passwort');
             return res.json({ success: true });
         }
+        addLog('login_failed', req.ip, 'Fehlgeschlagener Login');
         res.status(401).json({ success: false, error: 'Falsche Anmeldedaten' });
     });
 
     // Logout
     app.post('/api/logout', (req, res) => {
+        const session = getSession(req);
         const token = req.cookies?.session;
         if (token && sessions[token]) {
+            addLog('logout', session?.username || 'unknown', 'Logout');
             delete sessions[token];
             saveSessions();
         }
@@ -312,6 +358,14 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
         });
     });
 
+    // API: Logs (gefiltert, kein Delete)
+    app.get('/api/logs', (req, res) => {
+        const logs = getLogsFiltered(req.query);
+        const types = [...new Set(loadLogs().map(l => l.type))].sort();
+        const users = [...new Set(loadLogs().map(l => l.username).filter(Boolean))].sort();
+        res.json({ logs, types, users });
+    });
+
     // API: Download single file
     app.get('/api/download/:folder/:file', (req, res) => {
         const folder = req.params.folder;
@@ -326,6 +380,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
             return res.status(404).json({ error: 'Datei nicht gefunden' });
         }
         const safeFile = path.basename(file);
+        addLog('download', getSession(req)?.username || 'unknown', `Download: ${folder}/${safeFile}`);
         res.setHeader('Content-Disposition', `attachment; filename="${safeFile}"`);
         res.setHeader('Content-Type', 'audio/wav');
         res.setHeader('Content-Length', fs.statSync(filePath).size);
@@ -355,6 +410,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
         if (files.length === 1) {
             const filePath = join(folderPath, files[0]);
             const safeFile = path.basename(files[0]);
+            addLog('download', getSession(req)?.username || 'unknown', `Download-All: ${folder}/${safeFile}`);
             res.setHeader('Content-Disposition', `attachment; filename="${safeFile}"`);
             res.setHeader('Content-Type', 'audio/wav');
             const stream = fs.createReadStream(filePath);
@@ -386,9 +442,11 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
         try {
             fs.rmSync(folderPath, { recursive: true, force: true });
+            addLog('delete_folder', getSession(req)?.username || 'unknown', `Ordner gelöscht: ${folder}`);
             console.log(`[Web] Ordner gelöscht: ${folder}`);
             res.json({ success: true, folder });
         } catch (err) {
+            addLog('error', getSession(req)?.username || 'unknown', `Fehler beim Löschen von Ordner ${folder}: ${err.message}`);
             console.error(`[Fehler] Löschen ${folder}:`, err.message);
             res.status(500).json({ error: 'Fehler beim Löschen' });
         }
@@ -411,9 +469,11 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
         try {
             fs.unlinkSync(filePath);
+            addLog('delete_file', getSession(req)?.username || 'unknown', `Datei gelöscht: ${folder}/${file}`);
             console.log(`[Web] Datei gelöscht: ${folder}/${file}`);
             res.json({ success: true, folder, file });
         } catch (err) {
+            addLog('error', getSession(req)?.username || 'unknown', `Fehler beim Löschen von ${folder}/${file}: ${err.message}`);
             console.error(`[Fehler] Löschen ${folder}/${file}:`, err.message);
             res.status(500).json({ error: 'Fehler beim Löschen' });
         }

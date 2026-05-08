@@ -29,37 +29,75 @@
         </header>
 
         <main class="main">
-            <div class="filter-bar">
-                <div class="filter-group">
-                    <label for="filter-user">User:</label>
-                    <input type="text" id="filter-user" placeholder="User suchen...">
-                </div>
-                <div class="filter-group">
-                    <label for="filter-date">Datum:</label>
-                    <input type="date" id="filter-date">
-                </div>
-                <div class="filter-group">
-                    <label for="filter-talk">Talk:</label>
-                    <input type="text" id="filter-talk" placeholder="Talk suchen...">
-                </div>
-                <span id="filter-count" class="filter-count"></span>
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="recordings">Aufnahmen</button>
+                <button class="tab-btn" data-tab="logs">Logs</button>
             </div>
 
-            <div id="loading" class="loading">
-                <div class="spinner"></div>
-                <p>Lade Aufnahmen...</p>
+            <div id="tab-recordings">
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label for="filter-user">User:</label>
+                        <input type="text" id="filter-user" placeholder="User suchen...">
+                    </div>
+                    <div class="filter-group">
+                        <label for="filter-date">Datum:</label>
+                        <input type="date" id="filter-date">
+                    </div>
+                    <div class="filter-group">
+                        <label for="filter-talk">Talk:</label>
+                        <input type="text" id="filter-talk" placeholder="Talk suchen...">
+                    </div>
+                    <span id="filter-count" class="filter-count"></span>
+                </div>
+
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <p>Lade Aufnahmen...</p>
+                </div>
+
+                <div id="recordings-list" class="recordings-list hidden"></div>
+
+                <div id="empty-state" class="empty-state hidden">
+                    <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="22"/>
+                    </svg>
+                    <h2>Keine Aufnahmen vorhanden</h2>
+                    <p>Sobald Voice-Aufnahmen erstellt werden, erscheinen sie hier.</p>
+                </div>
             </div>
 
-            <div id="recordings-list" class="recordings-list hidden"></div>
+            <div id="tab-logs" class="hidden">
+                <div class="filter-bar">
+                    <div class="filter-group">
+                        <label for="log-filter-type">Typ:</label>
+                        <select id="log-filter-type">
+                            <option value="">Alle</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="log-filter-user">User:</label>
+                        <input type="text" id="log-filter-user" placeholder="User suchen...">
+                    </div>
+                    <div class="filter-group">
+                        <label for="log-filter-from">Von:</label>
+                        <input type="date" id="log-filter-from">
+                    </div>
+                    <div class="filter-group">
+                        <label for="log-filter-to">Bis:</label>
+                        <input type="date" id="log-filter-to">
+                    </div>
+                    <span id="log-count" class="filter-count"></span>
+                </div>
 
-            <div id="empty-state" class="empty-state hidden">
-                <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="22"/>
-                </svg>
-                <h2>Keine Aufnahmen vorhanden</h2>
-                <p>Sobald Voice-Aufnahmen erstellt werden, erscheinen sie hier.</p>
+                <div id="log-loading" class="loading hidden">
+                    <div class="spinner"></div>
+                    <p>Lade Logs...</p>
+                </div>
+
+                <div id="logs-list" class="logs-list"></div>
             </div>
         </main>
     </div>
