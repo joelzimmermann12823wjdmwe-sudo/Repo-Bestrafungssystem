@@ -23,6 +23,12 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(cookieParser());
+    // Geschützte Route für / (verhindert Login-Bypass)
+    app.get('/', (req, res, next) => {
+        if (getSession(req)) return next(); // authed → static serve
+        res.redirect('/login');
+    });
+
     app.use(express.static(path.join(__dirname, '..', 'public')));
 
     // Persistent session store

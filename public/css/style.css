@@ -573,6 +573,8 @@ body {
 .log-type.channel_create { background: rgba(87,242,135,0.15); color: var(--success); }
 .log-type.channel_delete { background: rgba(237,66,69,0.15); color: var(--danger); }
 .log-type.command { background: rgba(88,101,242,0.15); color: #8b9aff; }
+.log-type.recording_start { background: rgba(237,66,69,0.15); color: var(--danger); }
+.log-type.bot_restart { background: rgba(88,101,242,0.15); color: #8b9aff; }
 
 .log-user {
     color: var(--accent);

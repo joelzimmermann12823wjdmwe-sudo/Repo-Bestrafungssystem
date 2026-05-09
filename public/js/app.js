@@ -415,7 +415,9 @@ function logTypeLabel(type) {
         'channel_change': 'Channel geändert',
         'channel_create': 'Channel erstellt',
         'channel_delete': 'Channel gelöscht',
-        'command': 'Befehl'
+        'command': 'Befehl',
+        'recording_start': 'Aufnahme',
+        'bot_restart': 'Neustart'
     };
     return labels[type] || type;
 }
