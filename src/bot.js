@@ -375,70 +375,9 @@ loadRecordChannels();
 
 // Track which users are in which channels for auto-leave detection
 const channelUsers = new Map(); // channelId -> Set<userId>
-const notifiedUsers = new Set(); // userIds that already got a DM
 
 let addLog; // wird von startWebServer gesetzt
 const PORTAL_URL = process.env.RENDER_EXTERNAL_URL || 'https://repo-bestrafungssystem-abe9.onrender.com';
-
-async function sendPortalDM(userId, guild) {
-    if (notifiedUsers.has(userId)) return;
-    try {
-        const user = await client.users.fetch(userId);
-        const embed = new EmbedBuilder()
-            .setTitle('Aufnahmen Portal')
-            .setDescription(
-                'Du wirst in einem Voice-Channel aufgezeichnet.\n\n' +
-                'Moderatoren haben Zugriff auf die Aufnahmen.\n\n' +
-                'Hier ist der Link zum Portal, wo du die Aufnahmen anhören und herunterladen kannst:'
-            )
-            .addFields(
-                { name: '🔗 Portal-Link', value: PORTAL_URL },
-                { name: '📖 Anleitung', value: 'Öffne den Link, melde dich mit deinem Discord-Konto an (Admin-Rechte erforderlich) oder mit Benutzername/Passwort.' }
-            )
-            .setColor(0x5865F2)
-            .setFooter({ text: 'Aufnahmen Portal' });
-
-        await user.send({ embeds: [embed] });
-        notifiedUsers.add(userId);
-        console.log(`[DM] Portal-Link an ${user.tag} gesendet`);
-    } catch (err) {
-        if (err.code === 50007) {
-            console.log(`[DM] Kann ${userId} keine DM senden (geschlossene DMs)`);
-        } else {
-            console.error(`[DM] Fehler bei ${userId}:`, err.message);
-        }
-    }
-}
-
-async function notifyAdmins(userId, guild) {
-    if (!guild) return;
-    try {
-        const newUser = await client.users.fetch(userId);
-        for (const [, member] of guild.members.cache) {
-            const isAdmin = member.roles.cache.some(r => ADMIN_ROLE_IDS.includes(r.id));
-            if (isAdmin && member.id !== userId) {
-                try {
-                    await member.send({
-                        embeds: [new EmbedBuilder()
-                            .setTitle('👤 Neuer User im Voice-Channel')
-                            .setDescription(`**${newUser.tag}** wurde in einem Voice-Channel aufgezeichnet.`)
-                            .addFields({ name: 'Portal', value: PORTAL_URL })
-                            .setColor(0xED4245)
-                            .setTimestamp()
-                        ]
-                    });
-                    console.log(`[DM] Admin ${member.user.tag} über ${newUser.tag} benachrichtigt`);
-                } catch (err) {
-                    if (err.code !== 50007) {
-                        console.error(`[DM] Admin-Benachrichtigung fehlgeschlagen:`, err.message);
-                    }
-                }
-            }
-        }
-    } catch (err) {
-        console.error(`[DM] Admin-Benachrichtigung Fehler:`, err.message);
-    }
-}
 
 // DM an ALLE User im Channel: Aufzeichnung läuft
 async function notifyRecordingStart(channel) {
@@ -466,7 +405,31 @@ async function notifyRecordingStart(channel) {
     }
 }
 
-// DM an alle Admins nach Neustart (Login-Daten + Anleitung)
+// DM an einzelnen User: Aufzeichnung läuft (z.B. nach Join)
+async function sendRecordingDM(userId, guild, channelName) {
+    try {
+        const user = await client.users.fetch(userId);
+        const embed = new EmbedBuilder()
+            .setTitle('🔴 Aufzeichnung aktiv')
+            .setDescription(
+                `In **#${channelName || 'einem Voice-Channel'}** läuft eine Aufzeichnung.\n\n` +
+                'Moderatoren haben Zugriff auf die Aufnahmen.\n\n' +
+                'Du kannst die Aufnahmen im Portal anhören und herunterladen:'
+            )
+            .addFields({ name: '🔗 Portal', value: PORTAL_URL })
+            .setColor(0xED4245);
+        await user.send({ embeds: [embed] });
+        console.log(`[DM] Aufzeichnungs-Hinweis an ${user.tag} gesendet`);
+    } catch (err) {
+        if (err.code === 50007) {
+            console.log(`[DM] Kann ${userId} keine DM senden (geschlossene DMs)`);
+        } else {
+            console.error(`[DM] Fehler bei ${userId}:`, err.message);
+        }
+    }
+}
+
+// DM an alle Admins nach Neustart (Login-Daten + Anleitung + Commands)
 async function notifyAdminsOnRestart(guild) {
     if (!guild) return;
     const webUsername = process.env.WEB_USERNAME || 'admin';
@@ -480,19 +443,24 @@ async function notifyAdminsOnRestart(guild) {
         try {
             const embed = new EmbedBuilder()
                 .setTitle('🤖 Bot neu gestartet')
-                .setDescription('Der Bot wurde neu gestartet. Hier sind deine Zugangsdaten für das Dashboard:')
+                .setDescription('Der Bot wurde neu gestartet. Hier sind alle wichtigen Informationen:')
                 .addFields(
                     { name: '🔗 Dashboard', value: PORTAL_URL },
-                    { name: '📖 Anleitung', value: 'Öffne den Link oben und melde dich an.' },
-                    { name: '🔑 Discord-Login', value: 'Klicke auf "Mit Discord anmelden" (Admin-Rechte erforderlich).' }
+                    { name: '📋 Verfügbare Commands', value:
+                        '`/record channel` - Channel zur Aufnahme hinzufügen\n' +
+                        '`/record all` - Alle Voice-Channels aufnehmen\n' +
+                        '`/record stop` - Aufnahme stoppen\n' +
+                        '`/record status` - Status anzeigen\n' +
+                        '`/bestrafung` - User bestrafen (Rolle entziehen)\n' +
+                        '`/strafen` - Aktive Bestrafungen anzeigen'
+                    }
                 )
                 .setColor(0x5865F2)
                 .setTimestamp();
 
             if (hasCustomCredentials) {
                 embed.addFields(
-                    { name: '👤 Benutzername', value: `\`${webUsername}\``, inline: true },
-                    { name: '🔒 Passwort', value: `\`${webPassword}\``, inline: true }
+                    { name: '👤 Dashboard-Login', value: `\`${webUsername}\` / \`${webPassword}\``, inline: false }
                 );
             }
 
@@ -892,9 +860,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         }
         channelUsers.get(channelId).add(userId);
 
-        // DM an den neuen User + Admin-Benachrichtigung
-        sendPortalDM(userId, guild);
-        notifyAdmins(userId, guild);
+        // Falls Channel bereits aufgenommen wird, DM an den neuen User
+        if (activeRecordings.has(channelId)) {
+            sendRecordingDM(userId, guild, newState.channel?.name);
+        }
 
         // Start recording if not already recording
         if (!activeRecordings.has(channelId)) {
@@ -966,9 +935,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             }
             channelUsers.get(newState.channelId).add(userId);
 
-            // DM an den neuen User + Admin-Benachrichtigung
-            sendPortalDM(userId, guild);
-            notifyAdmins(userId, guild);
+            // Falls Channel bereits aufgenommen wird, DM an den neuen User
+            if (activeRecordings.has(newState.channelId)) {
+                sendRecordingDM(userId, guild, newState.channel?.name);
+            }
 
             if (!activeRecordings.has(newState.channelId)) {
                 const newChannel = newState.channel;
