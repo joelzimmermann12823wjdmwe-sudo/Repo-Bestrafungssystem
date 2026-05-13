@@ -24,6 +24,7 @@ const PUNISHMENT_ROLE_ID = process.env.PUNISHMENT_ROLE_ID;
 const ADMIN_ROLE_IDS = process.env.ADMIN_ROLE_IDS ? process.env.ADMIN_ROLE_IDS.split(',').map(s => s.trim()) : [];
 const GUILD_ID = process.env.GUILD_ID;
 const MAX_RECORDINGS = parseInt(process.env.MAX_RECORDINGS) || 10;
+const MAX_RECORDING_BYTES = 460 * 1024 * 1024; // 460 MB → automatische Rotation
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(TALKS_DIR)) fs.mkdirSync(TALKS_DIR, { recursive: true });
@@ -158,6 +159,16 @@ class VoiceRecorder {
         this.CHANNELS = 2;
         this.FRAME_SIZE = this.SAMPLE_RATE / 50;
         this._decodedPcm = new Map();
+    }
+
+    // Geschätzte PCM-Größe aller gesammelten Opus-Pakete (in Bytes)
+    getEstimatedPcmBytes() {
+        let totalPackets = 0;
+        const pcmBytesPerPacket = this.FRAME_SIZE * this.CHANNELS * 2; // 3840
+        for (const [, data] of this.userRecordings) {
+            totalPackets += data.opusPackets.length;
+        }
+        return totalPackets * pcmBytesPerPacket;
     }
 
     startUserStream(receiver, userId, username) {
@@ -415,14 +426,14 @@ async function sendRecordingDM(userId, guild, channelName) {
                 `In **#${channelName || 'einem Voice-Channel'}** läuft eine Aufzeichnung.\n\n` +
                 'Moderatoren haben Zugriff auf die Aufnahmen.\n\n' +
                 
-            )
+            ),
             
             .setColor(0xED4245);
         await user.send({ embeds: [embed] });
         console.log(`[DM] Aufzeichnungs-Hinweis an ${user.tag} gesendet`);
     } catch (err) {
         if (err.code === 50007) {
-            console.log(`[DM] Kann ${userId} keine DM senden (geschlossene DMs)`);
+            console.log(`[DM] Kann ${userId} keine DM senden (gechlossene DMs)`);
         } else {
             console.error(`[DM] Fehler bei ${userId}:`, err.message);
         }
@@ -527,6 +538,16 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
         receiver.speaking.on('start', speakingHandler);
 
         speakingListeners.set(channel.id, { receiver, handler: speakingHandler });
+        const sizeCheckInterval = setInterval(() => {
+            const est = recorder.getEstimatedPcmBytes();
+            if (est > MAX_RECORDING_BYTES) {
+                console.log(`[Record] ${channel.name}: ${(est / 1024 / 1024).toFixed(0)} MB geschätzt → Rotation`);
+                stopRecordingForChannel(channel.id).then(() => {
+                    startRecordingForChannel(channel, guild, autoManaged);
+                });
+            }
+        }, 30000); // alle 30s prüfen
+
         activeRecordings.set(channel.id, {
             connection,
             recorder,
@@ -535,7 +556,8 @@ async function startRecordingForChannel(channel, guild, autoManaged = true) {
             channelName: channel.name,
             folderName,
             outputDir,
-            autoManaged
+            autoManaged,
+            sizeCheckInterval
         });
 
         console.log(`[Record] Started in ${channel.name}`);
@@ -565,6 +587,10 @@ async function stopRecordingForChannel(channelId) {
     if (listener) {
         listener.receiver.speaking.removeListener('start', listener.handler);
         speakingListeners.delete(channelId);
+    }
+
+    if (session.sizeCheckInterval) {
+        clearInterval(session.sizeCheckInterval);
     }
 
     session.connection.destroy();
