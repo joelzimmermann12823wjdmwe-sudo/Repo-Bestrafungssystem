@@ -20,10 +20,6 @@ services:
         value: /opt/render/project/src/data
       - key: MAX_RECORDINGS
         value: 10
-      - key: WEB_USERNAME
-        sync: false
-      - key: WEB_PASSWORD
-        sync: false
       - key: GOOGLE_CLIENT_EMAIL
         sync: false
       - key: GOOGLE_PRIVATE_KEY

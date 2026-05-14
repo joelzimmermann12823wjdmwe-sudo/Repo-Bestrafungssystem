@@ -10,15 +10,9 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     const app = express();
     const webPort = parseInt(process.env.PORT) || 8080;
     const webHost = '0.0.0.0';
-    const webUsername = process.env.WEB_USERNAME || 'admin';
-    const webPassword = process.env.WEB_PASSWORD || 'admin123';
     const GUILD_ID = process.env.GUILD_ID;
     const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
     const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-
-    if (webUsername === 'admin' && webPassword === 'admin123') {
-        console.warn('[WARN] Default credentials! Set WEB_USERNAME and WEB_PASSWORD in .env');
-    }
 
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
@@ -158,7 +152,7 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
 
     function requireAuth(req, res, next) {
         if (getSession(req)) return next();
-        const publicPaths = ['/login', '/api/login', '/api/auth', '/css', '/js'];
+        const publicPaths = ['/login', '/api/auth', '/css', '/js'];
         if (publicPaths.some(p => req.path === p || req.path.startsWith(p + '/')) || req.path === '/favicon.ico') {
             return next();
         }
@@ -320,29 +314,6 @@ function startWebServer(client, activeRecordings, TALKS_DIR) {
     app.get('/login', (req, res) => {
         if (getSession(req)) return res.redirect('/');
         res.sendFile(path.join(__dirname, '..', 'public', 'login.html'));
-    });
-
-    // Login API
-    app.post('/api/login', (req, res) => {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ success: false, error: 'Benutzername und Passwort erforderlich' });
-        }
-        if (username === webUsername && password === webPassword) {
-            const token = createSession(username);
-            const isHttps = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https';
-            res.cookie('session', token, {
-                httpOnly: true,
-                secure: isHttps,
-                sameSite: 'lax',
-                maxAge: SESSION_MAX_AGE,
-                path: '/'
-            });
-            addLog('login', username, 'Login via Passwort');
-            return res.json({ success: true });
-        }
-        addLog('login_failed', req.ip, 'Fehlgeschlagener Login');
-        res.status(401).json({ success: false, error: 'Falsche Anmeldedaten' });
     });
 
     // Logout

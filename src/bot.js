@@ -443,9 +443,6 @@ async function sendRecordingDM(userId, guild, channelName) {
 // DM an alle Admins nach Neustart (Login-Daten + Anleitung + Commands)
 async function notifyAdminsOnRestart(guild) {
     if (!guild) return;
-    const webUsername = process.env.WEB_USERNAME || 'admin';
-    const webPassword = process.env.WEB_PASSWORD || 'admin123';
-    const hasCustomCredentials = webUsername !== 'admin' || webPassword !== 'admin123';
 
     for (const [, member] of guild.members.cache) {
         const isAdmin = member.roles.cache.some(r => ADMIN_ROLE_IDS.includes(r.id));
@@ -457,6 +454,7 @@ async function notifyAdminsOnRestart(guild) {
                 .setDescription('Der Bot wurde neu gestartet. Hier sind alle wichtigen Informationen:')
                 .addFields(
                     { name: '🔗 Dashboard', value: PORTAL_URL },
+                    { name: '🔑 Anmeldung', value: 'Mit Discord anmelden (Administrator-Rechte erforderlich).' },
                     { name: '📋 Verfügbare Commands', value:
                         '`/record channel` - Channel zur Aufnahme hinzufügen\n' +
                         '`/record all` - Alle Voice-Channels aufnehmen\n' +
@@ -468,12 +466,6 @@ async function notifyAdminsOnRestart(guild) {
                 )
                 .setColor(0x5865F2)
                 .setTimestamp();
-
-            if (hasCustomCredentials) {
-                embed.addFields(
-                    { name: '👤 Dashboard-Login', value: `\`${webUsername}\` / \`${webPassword}\``, inline: false }
-                );
-            }
 
             await member.send({ embeds: [embed] });
             console.log(`[DM] Restart-Anleitung an Admin ${member.user.tag} gesendet`);
