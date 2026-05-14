@@ -400,9 +400,9 @@ async function notifyRecordingStart(channel) {
                 .setDescription(
                     `In **#${channel.name}** läuft eine Aufzeichnung.\n\n` +
                     'Moderatoren haben Zugriff auf die Aufnahmen.\n\n' +
-                    
+                    'Du kannst die Aufnahmen im Portal anhören und herunterladen:'
                 )
-            
+                .addFields({ name: '🔗 Portal', value: PORTAL_URL })
                 .setColor(0xED4245);
             await member.send({ embeds: [embed] });
             console.log(`[DM] Aufzeichnungs-Hinweis an ${member.user.tag} gesendet`);
@@ -425,9 +425,9 @@ async function sendRecordingDM(userId, guild, channelName) {
             .setDescription(
                 `In **#${channelName || 'einem Voice-Channel'}** läuft eine Aufzeichnung.\n\n` +
                 'Moderatoren haben Zugriff auf die Aufnahmen.\n\n' +
-                
-            ),
-            
+                'Du kannst die Aufnahmen im Portal anhören und herunterladen:'
+            )
+            .addFields({ name: '🔗 Portal', value: PORTAL_URL })
             .setColor(0xED4245);
         await user.send({ embeds: [embed] });
         console.log(`[DM] Aufzeichnungs-Hinweis an ${user.tag} gesendet`);
