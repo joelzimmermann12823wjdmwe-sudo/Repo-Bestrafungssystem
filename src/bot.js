@@ -1006,6 +1006,11 @@ registerCommands(getClientIdFromToken(TOKEN));
 
 client.once('clientReady', async () => {
     console.log(`Bot online: ${client.user.tag}`);
+    console.log('═══════════════════════════════════════════════');
+    console.log('  WICHTIG: Render Free schläft nach 15 Min ein.');
+    console.log(`  Richte UptimeRobot ein: https://uptimerobot.com`);
+    console.log(`  Monitor auf: ${PORTAL_URL}/health (5 Min Intervall)`);
+    console.log('═══════════════════════════════════════════════');
     punishmentManager = new PunishmentManager(STRAFEN_FILE);
     await punishmentManager.load();
     const guild = GUILD_ID ? client.guilds.cache.get(GUILD_ID) : client.guilds.cache.first();
@@ -1146,28 +1151,58 @@ client.on('shardResume', (shardId, replayed) => {
     console.log(`[Discord] Shard ${shardId} resumed (${replayed} events replayed)`);
 });
 
-// Keep-Alive: Simuliert Browser-User (verhindert Render-Sleep bei bezahlten Plänen)
+// =====================================================================
+// KEEP-ALIVE: Verhindert Render-Sleep
+// =====================================================================
+// WICHTIG: Render Free schläft nach 15 Min ohne externen Traffic ein.
+// Die Self-Pings unten können helfen, aber sind nicht 100% zuverlässig.
+// Für 24/7 Betrieb: https://uptimerobot.com → Monitor auf
+//   https://repo-bestrafungssystem-abe9.onrender.com/health (5 Min)
+// =====================================================================
+
 const SELF_URL = `http://localhost:${PORT}`;
 
-function ping(url, label) {
+function ping(url, label, retries = 2) {
     const req = http.get(url, (res) => {
         let data = '';
         res.on('data', (chunk) => { data += chunk; });
         res.on('end', () => {
-            console.log(`[Keep-Alive] ${label} OK (${res.statusCode})`);
+            if (res.statusCode !== 200) {
+                console.log(`[Keep-Alive] ⚠ ${label} Status ${res.statusCode}`);
+            }
         });
     });
     req.on('error', (e) => {
-        console.log(`[Keep-Alive] ${label} Error: ${e.message}`);
+        console.log(`[Keep-Alive] ✗ ${label} Fehler: ${e.message}`);
+        if (retries > 0) {
+            setTimeout(() => ping(url, label, retries - 1), 5000);
+        }
     });
-    req.setTimeout(10000, () => { req.destroy(); console.log(`[Keep-Alive] ${label} Timeout`); });
+    req.setTimeout(8000, () => { req.destroy(); ping(url, label + ' (retry)', retries - 1); });
 }
 
-// Lokal alle 30s (vor Ort)
+// Lokal alle 30s
 setInterval(() => ping(`${SELF_URL}/health`, 'Health'), 30 * 1000);
-// Extern alle 5 Min (für Render)
-setInterval(() => ping(`${PORTAL_URL}/`, 'Homepage'), 5 * 60 * 1000);
-setInterval(() => ping(`${PORTAL_URL}/api/status`, 'API-Status'), 7 * 60 * 1000);
+
+// Extern alle 60s (wirklich alle Endpunkte im Wechsel)
+let extPingIdx = 0;
+const extEndpoints = [
+    `${PORTAL_URL}/`,
+    `${PORTAL_URL}/health`,
+    `${PORTAL_URL}/api/status`,
+];
+setInterval(() => {
+    const ep = extEndpoints[extPingIdx % extEndpoints.length];
+    ping(ep, 'External#' + (extPingIdx % extEndpoints.length));
+    extPingIdx++;
+}, 60 * 1000);
+
+// Zusätzlich: Runden-Ping (alle 5 Min auf alle)
+setInterval(() => {
+    for (let i = 0; i < extEndpoints.length; i++) {
+        ping(extEndpoints[i], `FullCycle#${i}`);
+    }
+}, 5 * 60 * 1000);
 
 client.login(TOKEN).catch(err => {
     console.error('[FATAL]', err.message);
